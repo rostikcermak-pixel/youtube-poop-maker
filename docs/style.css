@@ -318,3 +318,17 @@ dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
   .tab-name{padding:7px 4px 7px 12px}
   .tab-x{padding:7px 10px 7px 4px}
 }
+
+/* ---------- moving a word along the mix ---------- */
+.chip{padding:0 4px 0 4px}
+.chip-name{padding:0 2px}
+.nudge{
+  border:0;background:transparent;color:inherit;font-size:15px;line-height:1;
+  padding:4px 5px;border-radius:6px;opacity:.55;
+}
+.nudge:hover:not(:disabled){opacity:1;background:rgba(0,0,0,.12)}
+.nudge:disabled{opacity:.15;cursor:default}
+@media (max-width:820px){
+  .nudge{padding:7px 8px;font-size:17px}
+  .chip{height:38px}
+}

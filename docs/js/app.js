@@ -162,6 +162,44 @@ function addToMix(clipId, s, e, w) {
   insertIntoMix([{ clipId, s, e, w }]);
 }
 
+/**
+ * Move a chip one place earlier or later.
+ *
+ * A word built from fragments spans several chips that only mean anything in
+ * order, so the whole group travels together and hops over whatever is beside
+ * it, rather than being waded through one piece at a time.
+ */
+function shift(item, direction) {
+  const group = item.group
+    ? state.mix.filter((m) => m.group === item.group)
+    : [item];
+  const first = state.mix.indexOf(group[0]);
+  const last = state.mix.indexOf(group[group.length - 1]);
+  if (first < 0) return;
+
+  const neighbour = direction < 0 ? first - 1 : last + 1;
+  if (neighbour < 0 || neighbour >= state.mix.length) return;
+
+  // step over the neighbour's whole group too, so one tap always swaps two
+  // words rather than burrowing into the middle of one
+  const other = state.mix[neighbour];
+  const block = other.group
+    ? state.mix.filter((m) => m.group === other.group)
+    : [other];
+
+  remember();
+  const moving = state.mix.slice(first, last + 1);
+  const rest = state.mix.filter((m) => !moving.includes(m));
+  const landing = direction < 0
+    ? rest.indexOf(block[0])
+    : rest.indexOf(block[block.length - 1]) + 1;
+  rest.splice(landing, 0, ...moving);
+  state.mix = rest;
+  state.caret = Math.min(state.caret, state.mix.length);
+  renderMix();
+  audition(item.clipId, item.s, item.e, null);
+}
+
 function caretMark() {
   const mark = document.createElement('span');
   mark.className = 'caret';
@@ -184,9 +222,32 @@ function renderMix() {
       chip.draggable = true;
       chip.dataset.key = item.key;
 
+      // Reordering used to be drag-only, which is close to unusable with a
+      // thumb. Moving a word past its neighbour is the commonest edit there
+      // is — "a fucking architect" into "fucking an architect" is two nudges
+      // — so it gets its own buttons.
+      const left = document.createElement('button');
+      left.className = 'nudge';
+      left.innerHTML = '&lsaquo;';
+      left.title = 'move earlier';
+      left.setAttribute('aria-label', `move ${item.w} earlier`);
+      left.disabled = index === 0;
+      left.addEventListener('click', (ev) => { ev.stopPropagation(); shift(item, -1); });
+      chip.appendChild(left);
+
       const label = document.createElement('span');
+      label.className = 'chip-name';
       label.textContent = item.w;
       chip.appendChild(label);
+
+      const right = document.createElement('button');
+      right.className = 'nudge';
+      right.innerHTML = '&rsaquo;';
+      right.title = 'move later';
+      right.setAttribute('aria-label', `move ${item.w} later`);
+      right.disabled = index === state.mix.length - 1;
+      right.addEventListener('click', (ev) => { ev.stopPropagation(); shift(item, 1); });
+      chip.appendChild(right);
 
       const x = document.createElement('button');
       x.className = 'x';
