@@ -63,6 +63,23 @@ realtime**. The website on a phone takes minutes for the same thing.
 Saving a video also goes through ffmpeg here rather than by recording playback,
 so it is not limited to real time.
 
+### Using it from your phone, at laptop speed
+
+```
+python run.py --share
+```
+
+It prints an address to open on your phone, on the same wifi. The phone gets
+the same interface, but the listening happens on the laptop — so a clip that
+takes minutes in a phone browser comes back in seconds. Anyone on that network
+can reach it while it is running, so use it on a network you trust.
+
+Termux is not a route to this. `faster-whisper` rests on `ctranslate2`, whose
+prebuilt packages target glibc while Termux uses Bionic, so pip falls back to
+compiling a large C++ project from source; Termux's own repository does not
+carry it either, and the bundled ffmpeg is x86-only. Use `--share`, or the
+website.
+
 | Variable | Default | Does |
 | --- | --- | --- |
 | `YTP_HOME` | `~/.ytp` | Where imported clips are kept |
