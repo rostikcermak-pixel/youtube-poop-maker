@@ -720,6 +720,11 @@ async function importFile(file) {
       quality,
       onPhase: (which) => {
         phase = which;
+        if (which === 'server') {
+          show('Listening on this machine — much quicker than in the tab, and '
+             + 'no model to download.', 0.6);
+          return;
+        }
         if (which !== 'listening') return;
         show('Listening… the words appear as it goes, and you can start '
            + 'clicking them straight away.', 0.55);

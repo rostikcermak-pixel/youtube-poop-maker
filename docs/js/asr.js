@@ -107,6 +107,49 @@ export async function load(quality = 'good', onProgress = () => {}) {
   return pipe;
 }
 
+let serverPromise = null;
+
+/**
+ * Is there a local server behind this page that can do the listening?
+ *
+ * The same interface is served two ways: from a static host, where the
+ * work happens in the tab under WebAssembly on one core, and from the
+ * local server, where it happens natively across all of them. Asking once
+ * costs a round trip to the same origin and decides which.
+ */
+export function localServer() {
+  if (!serverPromise) {
+    serverPromise = fetch('api/health', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((info) => (info && info.server ? info : null))
+      .catch(() => null);
+  }
+  return serverPromise;
+}
+
+/** Hand the samples to the local server and take back words. */
+async function listenOnServer(samples, info, onPhase) {
+  onPhase('server');
+  const res = await fetch('api/transcribe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    // already decoded and resampled here, so send it as it sits in memory
+    body: samples.buffer.byteLength === samples.length * 4
+      ? samples.buffer
+      : samples.slice().buffer,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error((detail && detail.detail) || 'The local server could not read that.');
+  }
+  const body = await res.json();
+  if (!body.words || !body.words.length) {
+    throw new Error("I couldn't hear any talking in this one.");
+  }
+  lastBackend = `server (${body.model || 'local'})`;
+  return body.words;
+}
+
 /**
  * Transcribe 16 kHz mono samples into words with times.
  *
@@ -120,6 +163,15 @@ export async function listen(samples, {
   onPhase = () => {},
   onWords = () => {},
 } = {}) {
+  // Running on the machine beats anything the tab can do, so take it when
+  // it's there: no model to download, and every core instead of one.
+  const server = await localServer();
+  if (server) {
+    const words = await listenOnServer(samples, server, onPhase);
+    onWords(words, 1);
+    return words;
+  }
+
   onPhase('downloading');
   const transcriber = await load(quality, onProgress);
 

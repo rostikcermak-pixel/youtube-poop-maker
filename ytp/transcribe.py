@@ -13,6 +13,15 @@ from .media import SAMPLE_RATE
 _model = None
 _model_lock = threading.Lock()
 
+# Greedy decoding rather than a beam search.
+#
+# Measured on a 25 s clip: five beams took 1.7 s against 0.6 s greedy with
+# tiny, and 4.6 s against 2.6 s with small — two to three times the work for
+# the same 64 words either way. Sentence mixing wants the timings far more
+# than it wants the model's second-guessing, and you can hear every word
+# before you use it.
+BEAM = int(os.environ.get("YTP_BEAM", 1))
+
 
 def model_name() -> str:
     return os.environ.get("YTP_MODEL", "small.en")
@@ -29,6 +38,8 @@ def _load():
                 model_name(),
                 device=os.environ.get("YTP_DEVICE", "cpu"),
                 compute_type=os.environ.get("YTP_COMPUTE", "int8"),
+                # default is conservative; use the machine you're on
+                cpu_threads=int(os.environ.get("YTP_THREADS", 0)) or (os.cpu_count() or 4),
             )
     return _model
 
@@ -191,6 +202,49 @@ def tighten(words: list[dict], samples: np.ndarray) -> list[dict]:
     return words
 
 
+def warm() -> None:
+    """Load the model now, so the first clip doesn't wait for it.
+
+    Loading is most of what a first request costs: the same clip that
+    transcribes in under two seconds took twenty-seven the first time,
+    almost all of it getting the model into memory.
+    """
+    _load()
+
+
+def listen_samples(samples: np.ndarray) -> list[dict]:
+    """Transcribe samples the browser has already decoded for us.
+
+    faster-whisper takes an array directly, so audio that has been decoded
+    and resampled in the page does not need writing back out to a file
+    just to be read again.
+    """
+    model = _load()
+    segments, _info = model.transcribe(
+        samples.astype(np.float32),
+        word_timestamps=True,
+        vad_filter=True,
+        beam_size=BEAM,
+    )
+
+    words: list[dict] = []
+    for segment in segments:
+        for w in segment.words or []:
+            text = w.word.strip()
+            if not text:
+                continue
+            words.append(
+                {
+                    "i": len(words),
+                    "w": text,
+                    "s": round(float(w.start), 4),
+                    "e": round(float(w.end), 4),
+                    "p": round(float(w.probability), 3),
+                }
+            )
+    return tighten(repair(words), samples)
+
+
 def listen(
     wav_path: Path,
     samples: np.ndarray,
@@ -202,7 +256,7 @@ def listen(
         str(wav_path),
         word_timestamps=True,
         vad_filter=True,
-        beam_size=5,
+        beam_size=BEAM,
     )
 
     words: list[dict] = []

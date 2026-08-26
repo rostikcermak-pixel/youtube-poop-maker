@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 import shutil
 import time
+
+import numpy as np
 import threading
 import traceback
 from pathlib import Path
@@ -15,7 +17,22 @@ from fastapi.staticfiles import StaticFiles
 
 from . import media, render, store, syllables, transcribe
 
-WEB = Path(__file__).parent / "web"
+def _web_root() -> Path:
+    """Serve the same interface the website uses.
+
+    There is one app, in docs/. Running locally only changes where the
+    listening happens: on the machine instead of in the tab. Keeping a
+    second copy of the interface here meant the local one quietly fell
+    years behind, missing the word builder, the caret, undo and the rest.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here.parent / "docs", here / "web"):
+        if (candidate / "index.html").exists():
+            return candidate
+    return here / "web"
+
+
+WEB = _web_root()
 
 app = FastAPI(title="YTP Maker")
 
@@ -264,9 +281,39 @@ async def get_word_detail(clip_id: str, s: float, e: float, pad: float = 0.3):
         "snaps": [round(view_from + t, 4) for t in syllables.snap_points(view, rate)],
     }
 
+@app.on_event("startup")
+async def warm_model() -> None:
+    """Start loading the model as the server comes up, off the request path."""
+    threading.Thread(target=transcribe.warm, daemon=True).start()
+
+
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "model": transcribe.model_name()}
+    """The page probes this to decide whether to listen here or in the tab."""
+    return {"ok": True, "server": True, "model": transcribe.model_name()}
+
+
+@app.post("/api/transcribe")
+async def transcribe_samples(request: Request):
+    """Listen to raw 16 kHz mono float32 samples sent straight from the page.
+
+    The browser has already decoded and resampled the audio, so there is
+    nothing to gain from re-encoding it into a file just to hand it over.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "no audio was sent")
+
+    samples = np.frombuffer(body, dtype="<f4")
+    if samples.size < media.SAMPLE_RATE // 10:
+        raise HTTPException(400, "that is too short to hear anything in")
+
+    try:
+        words = transcribe.listen_samples(samples)
+    except Exception as exc:
+        raise HTTPException(500, str(exc)[:400])
+
+    return {"words": words, "model": transcribe.model_name()}
 
 
 app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

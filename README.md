@@ -40,25 +40,36 @@ To run it locally:
 python -m http.server -d docs
 ```
 
-### On your own machine (`ytp/`)
+### On your own machine
 
-The Python version. Faster on long videos, and it renders a saved video with
-ffmpeg rather than by recording playback, so saving isn't limited to real time.
+One command:
 
 ```
-uv venv
-uv pip install --python .venv/bin/python -e .
-.venv/bin/python -m ytp
+python run.py
 ```
 
-It starts a local server and opens your browser. First run downloads the
-speech model (about 500 MB), cached afterwards.
+That builds its own environment beside the file, installs what it needs the
+first time, starts the server and opens the app. Nothing is installed
+system-wide.
+
+It serves the same interface as the website — the only difference is where the
+listening happens. The page notices the server and hands the audio to it, so
+there is no model to download in the browser and the work runs natively across
+every core instead of in a tab on one.
+
+Measured on a slow shared machine, a 25 second clip: 0.5 s, about **47x
+realtime**. The website on a phone takes minutes for the same thing.
+
+Saving a video also goes through ffmpeg here rather than by recording playback,
+so it is not limited to real time.
 
 | Variable | Default | Does |
 | --- | --- | --- |
 | `YTP_HOME` | `~/.ytp` | Where imported clips are kept |
-| `YTP_MODEL` | `small.en` | `tiny.en` is faster, `medium.en` is more accurate |
+| `YTP_MODEL` | `small.en` | `tiny.en` is quicker, `medium.en` is more accurate |
 | `YTP_DEVICE` | `cpu` | Set to `cuda` if you have a suitable GPU |
+| `YTP_THREADS` | every core | Decoding threads |
+| `YTP_BEAM` | `1` | Greedy. `5` searches wider for the same words, 2-3x slower |
 
 ## Tests
 
