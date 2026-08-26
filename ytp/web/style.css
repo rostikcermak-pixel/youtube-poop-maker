@@ -135,3 +135,22 @@ video{
   font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--ink3);
   font-variant-numeric:tabular-nums;
 }
+
+/* ---------- save sheet ---------- */
+dialog{
+  border:1px solid var(--line2);border-radius:12px;background:var(--panel);
+  color:var(--ink);padding:22px;max-width:380px;width:calc(100% - 32px);
+  box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
+}
+dialog::backdrop{background:rgba(10,9,18,.55)}
+dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
+.sheet-sub{margin:0 0 16px;color:var(--ink3);font-size:13.5px}
+.sheet-opts{display:flex;flex-direction:column;gap:8px}
+.sheet-opts .btn{width:100%;text-align:left;padding:10px 14px}
+.sheet-state{
+  margin:14px 0 0;font-size:13.5px;color:var(--violet-ink);
+  background:var(--violet-soft);border:1px solid var(--violet);
+  border-radius:8px;padding:9px 12px;
+}
+.sheet-state.bad{color:var(--warn);background:var(--warn-soft);border-color:var(--warn)}
+.sheet-foot{display:flex;justify-content:flex-end;margin-top:16px}

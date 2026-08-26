@@ -66,6 +66,19 @@
   </div>
 </div>
 
+<dialog id="saveSheet">
+  <h3>Save your mix</h3>
+  <p id="saveInfo" class="sheet-sub"></p>
+  <div class="sheet-opts">
+    <button class="btn ghost" data-h="0">Same size as the video</button>
+    <button class="btn ghost" data-h="1080">1080p</button>
+    <button class="btn ghost" data-h="720">720p</button>
+    <button class="btn ghost" data-audio="1">Just the sound</button>
+  </div>
+  <p id="saveState" class="sheet-state" hidden></p>
+  <div class="sheet-foot"><button class="btn ghost" id="saveClose">cancel</button></div>
+</dialog>
+
 <input type="file" id="file" accept="video/*,audio/*" hidden>
 <script src="app.js"></script>
 </body>

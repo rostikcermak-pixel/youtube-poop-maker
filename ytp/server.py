@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 import threading
 import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import media, store, transcribe
+from . import media, render, store, transcribe
 
 WEB = Path(__file__).parent / "web"
 
@@ -168,6 +170,67 @@ async def get_video(clip_id: str, request: Request):
         },
     )
 
+
+# -------------------------------------------------------------------- saving
+
+class MixPiece(BaseModel):
+    clipId: str
+    s: float
+    e: float
+
+
+class RenderRequest(BaseModel):
+    items: list[MixPiece]
+    height: int = 720          # 0 keeps whatever the source was
+    audioOnly: bool = False
+
+
+def exports_dir():
+    d = store.data_dir() / "exports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@app.post("/api/render")
+async def render_mix(req: RenderRequest):
+    if not req.items:
+        raise HTTPException(400, "There's nothing in your mix yet.")
+
+    pieces, clips = [], {}
+    for item in req.items:
+        clip = clips.get(item.clipId) or store.load(item.clipId)
+        if clip is None:
+            raise HTTPException(404, "One of the clips in your mix is missing.")
+        clips[item.clipId] = clip
+        pieces.append(render.Piece(clip.video_path, item.s, item.e, clip.has_video))
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    try:
+        if req.audioOnly:
+            out = render.render_audio(pieces, exports_dir() / f"poop-{stamp}.wav")
+        else:
+            first = next(iter(clips.values()))
+            height = req.height or (first.height or 720)
+            width = round(height * 16 / 9 / 2) * 2
+            out = render.render(
+                pieces,
+                exports_dir() / f"poop-{stamp}.mp4",
+                width=width,
+                height=height - (height % 2),
+                fps=first.fps or 30.0,
+            )
+    except Exception as exc:
+        raise HTTPException(500, str(exc)[:400])
+
+    return {"name": out.name, "url": f"/api/exports/{out.name}", "bytes": out.stat().st_size}
+
+
+@app.get("/api/exports/{name}")
+async def get_export(name: str):
+    path = exports_dir() / Path(name).name        # never escape the exports folder
+    if not path.exists():
+        raise HTTPException(404, "no such file")
+    return FileResponse(path, filename=path.name)
 
 @app.get("/api/health")
 async def health():

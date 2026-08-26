@@ -211,6 +211,46 @@ function wireMixDrop() {
   });
 }
 
+/* ----------------------------------------------------------------- saving */
+
+async function saveMix(height, audioOnly) {
+  const note = $('saveState');
+  const buttons = $('saveSheet').querySelectorAll('.btn');
+  buttons.forEach((b) => { b.disabled = true; });
+  note.hidden = false;
+  note.className = 'sheet-state';
+  note.textContent = audioOnly ? 'Saving the sound…' : 'Saving your video…';
+
+  try {
+    const res = await fetch('/api/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        items: state.mix.map((m) => ({ clipId: m.clipId, s: m.s, e: m.e })),
+        height,
+        audioOnly,
+      }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || 'something went wrong');
+
+    const link = document.createElement('a');
+    link.href = body.url;
+    link.download = body.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    const mb = (body.bytes / 1e6).toFixed(1);
+    note.textContent = `Saved ${body.name} (${mb} MB).`;
+  } catch (err) {
+    note.className = 'sheet-state bad';
+    note.textContent = String(err.message || err);
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
 /* ---------------------------------------------------------------- clips UI */
 
 function renderTabs() {
@@ -397,6 +437,20 @@ function wire() {
     if (state.playing) stopAll(); else playMix();
   });
   $('clear').addEventListener('click', () => { state.mix = []; stopAll(); renderMix(); });
+
+  $('save').addEventListener('click', () => {
+    const secs = mixDuration().toFixed(2);
+    $('saveInfo').textContent = `${state.mix.length} pieces, ${secs} seconds long.`;
+    $('saveState').hidden = true;
+    $('saveSheet').showModal();
+  });
+  $('saveClose').addEventListener('click', () => $('saveSheet').close());
+  $('saveSheet').querySelectorAll('[data-h],[data-audio]').forEach((b) => {
+    b.addEventListener('click', () => saveMix(
+      Number(b.dataset.h || 0),
+      b.dataset.audio === '1',
+    ));
+  });
 
   $('wave').addEventListener('click', (ev) => {
     const clip = state.clips.find((c) => c.id === state.activeId);
