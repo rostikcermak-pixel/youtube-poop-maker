@@ -10,11 +10,6 @@ import numpy as np
 
 from .media import SAMPLE_RATE
 
-# Frame size for the energy curve used to tighten word edges.
-HOP = 80                     # 5 ms at 16 kHz
-SNAP_WINDOW = 0.12           # look this far either side of a reported boundary
-MIN_WORD = 0.02              # never shrink a word below 20 ms
-
 _model = None
 _model_lock = threading.Lock()
 
@@ -24,6 +19,7 @@ def model_name() -> str:
 
 
 def _load():
+    """Loaded once, lazily — the first call downloads the model."""
     global _model
     with _model_lock:
         if _model is None:
@@ -37,6 +33,13 @@ def _load():
     return _model
 
 
+# Frame size for the energy curve used to tighten word edges.
+HOP = 80                     # 5 ms at 16 kHz
+SNAP_WINDOW = 0.12           # how far either side of a reported edge to look
+PULL = 0.5                   # bias toward leaving the edge where it was
+MIN_WORD = 0.02              # never let a word collapse below 20 ms
+
+
 def _energy(samples: np.ndarray) -> np.ndarray:
     """Short-term RMS, one value per HOP samples."""
     n = samples.size // HOP
@@ -46,38 +49,110 @@ def _energy(samples: np.ndarray) -> np.ndarray:
     return np.sqrt((trimmed.astype(np.float32) ** 2).mean(axis=1))
 
 
-def _quietest_near(energy: np.ndarray, t: float, lo: float, hi: float) -> float:
-    """The quietest moment within the search window — that's where to cut."""
+def _snap(energy: np.ndarray, raw: float, lo: float, hi: float) -> float:
+    """The most convincing quiet moment near `raw`, preferring to stay put.
+
+    Plain "quietest point in the window" drags edges toward whatever deep
+    silence happens to be in range, which steals audio from the next word.
+    Scoring loudness plus distance keeps an edge still unless moving it
+    buys a real drop in level.
+    """
     frames_per_sec = SAMPLE_RATE / HOP
-    lo = max(lo, t - SNAP_WINDOW)
-    hi = min(hi, t + SNAP_WINDOW)
+    lo = max(lo, raw - SNAP_WINDOW)
+    hi = min(hi, raw + SNAP_WINDOW)
     if hi <= lo:
-        return t
-    a = int(lo * frames_per_sec)
-    b = int(hi * frames_per_sec)
-    a = max(0, min(a, energy.size - 1))
-    b = max(a + 1, min(b, energy.size))
-    if b <= a:
-        return t
-    return (a + int(np.argmin(energy[a:b]))) / frames_per_sec
+        return raw
+
+    a = max(0, min(int(lo * frames_per_sec), energy.size - 1))
+    b = max(a + 1, min(int(hi * frames_per_sec) + 1, energy.size))
+    if b <= a + 1:
+        return raw
+
+    window = energy[a:b]
+    times = np.arange(a, b, dtype=np.float32) / frames_per_sec
+    loudest = float(window.max())
+    if loudest <= 0:
+        return raw
+    score = window / loudest + PULL * np.abs(times - raw) / SNAP_WINDOW
+    return float(times[int(np.argmin(score))])
+
+
+def repair(words: list[dict]) -> list[dict]:
+    """Rescue words Whisper collapsed to nothing.
+
+    Alignment sometimes fails on a long or unusual word: it comes back with
+    zero duration while the word beside it holds the whole shared span. Left
+    alone, clicking that word plays silence. When a neighbour is carrying
+    obviously more time than its own length justifies, split the span they
+    share in proportion to how many characters each word has.
+    """
+    healthy = [w for w in words if w["e"] - w["s"] >= MIN_WORD and w["w"]]
+    if len(healthy) < 3:
+        return words
+    per_char = float(np.median([(w["e"] - w["s"]) / len(w["w"]) for w in healthy]))
+    if per_char <= 0:
+        return words
+
+    for i, word in enumerate(words):
+        if word["e"] - word["s"] >= MIN_WORD:
+            continue
+        for j in (i - 1, i + 1):
+            if not 0 <= j < len(words):
+                continue
+            other = words[j]
+            touching = min(abs(other["e"] - word["s"]), abs(word["e"] - other["s"])) <= 0.05
+            bloated = (other["e"] - other["s"]) > 1.6 * per_char * max(1, len(other["w"]))
+            if not (touching and bloated):
+                continue
+
+            first, second = (words[j], words[i]) if j < i else (words[i], words[j])
+            lo, hi = min(word["s"], other["s"]), max(word["e"], other["e"])
+            if hi - lo < 2 * MIN_WORD:
+                continue
+            share = max(1, len(first["w"])) / (max(1, len(first["w"])) + max(1, len(second["w"])))
+            cut = lo + (hi - lo) * share
+            first["s"], first["e"] = lo, cut
+            second["s"], second["e"] = cut, hi
+            break
+    return words
 
 
 def tighten(words: list[dict], samples: np.ndarray) -> list[dict]:
-    """Whisper's timings drift by ~0.1 s. Nudge each edge to the nearest gap."""
+    """Whisper's edges drift by ~0.1 s. Nudge each one to the nearest gap.
+
+    Every edge is snapped from its *original* position, never from an
+    already-moved neighbour, so a single bad nudge can't cascade down the
+    rest of the sentence.
+    """
     if not words:
         return words
     energy = _energy(samples)
     total = samples.size / SAMPLE_RATE
+    raw = [(w["s"], w["e"]) for w in words]
 
-    for i, word in enumerate(words):
-        prev_end = words[i - 1]["e"] if i > 0 else 0.0
-        next_start = words[i + 1]["s"] if i + 1 < len(words) else total
+    for word, (rs, re) in zip(words, raw):
+        word["s"] = _snap(energy, rs, 0.0, total)
+        word["e"] = _snap(energy, re, 0.0, total)
 
-        start = _quietest_near(energy, word["s"], prev_end, word["e"] - MIN_WORD)
-        end = _quietest_near(energy, word["e"], start + MIN_WORD, next_start)
+    # Snapping independently can leave two words overlapping; split the difference.
+    for earlier, later in zip(words, words[1:]):
+        if earlier["e"] > later["s"]:
+            middle = (earlier["e"] + later["s"]) / 2
+            earlier["e"] = later["s"] = middle
 
-        word["s"] = round(max(0.0, start), 4)
-        word["e"] = round(min(total, max(end, start + MIN_WORD)), 4)
+    # If any of that crushed a word, its original timing was better than ours.
+    for word, (rs, re) in zip(words, raw):
+        if word["e"] - word["s"] < MIN_WORD:
+            word["s"], word["e"] = rs, re
+
+    # Restoring can put an edge back over its neighbour, so settle order last.
+    for earlier, later in zip(words, words[1:]):
+        if earlier["e"] > later["s"]:
+            earlier["e"] = max(earlier["s"] + MIN_WORD, min(earlier["e"], later["s"]))
+
+    for word in words:
+        word["s"] = round(max(0.0, word["s"]), 4)
+        word["e"] = round(min(total, max(word["e"], word["s"] + MIN_WORD)), 4)
     return words
 
 
@@ -114,4 +189,4 @@ def listen(
             # Report the raw timings while streaming; tighten once at the end.
             on_progress(list(words), float(segment.end))
 
-    return tighten(words, samples)
+    return tighten(repair(words), samples)
