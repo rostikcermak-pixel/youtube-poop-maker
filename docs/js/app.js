@@ -2,7 +2,7 @@
 
 import { peaks, snapPoints, splitSyllables } from './analysis.js';
 import { RATE, decodeTo16kMono, mixdown, toWav } from './audio.js';
-import { MODELS, listen } from './asr.js';
+import { MODELS, backend, listen } from './asr.js';
 import { recordMix, supported as canRecord } from './export.js';
 import { load as loadSounds, soundsOf, tidy } from './phonemes.js';
 import { indexSounds, planWord } from './wordbuild.js';
@@ -664,6 +664,8 @@ async function importFile(file) {
            + 'clicking them straight away.', 0.55);
       },
       onWords: (found, fraction) => {
+        // Name the backend in the status. When this went wrong it took three
+        // wrong guesses to find out which one had run.
         // Show what has been heard so far rather than making someone wait for
         // the whole file. On a five minute clip the opening lines are usable
         // long before the end has been read.
@@ -674,8 +676,9 @@ async function importFile(file) {
           $('searchWrap').hidden = !found.length;
         }
         const done = Math.round(fraction * 100);
-        show(`Listening… ${done}% — the ${found.length} words found so far are `
-           + 'already clickable.', 0.55 + fraction * 0.45);
+        const where = backend() === 'webgpu' ? ' · GPU' : '';
+        show(`Listening… ${done}%${where} — the ${found.length} words found so `
+           + 'far are already clickable.', 0.55 + fraction * 0.45);
       },
       onProgress: (fraction) => {
         if (phase !== 'downloading') return;

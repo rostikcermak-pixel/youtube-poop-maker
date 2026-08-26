@@ -28,6 +28,12 @@ export const MODELS = {
 let pipe = null;
 let pipeKey = null;
 let libPromise = null;
+let lastBackend = null;
+
+/** Which backend actually ran, so a bad one can be spotted rather than guessed at. */
+export function backend() {
+  return lastBackend;
+}
 
 function lib() {
   if (!libPromise) libPromise = import(/* @vite-ignore */ LIB);
@@ -50,7 +56,24 @@ export async function load(quality = 'good', onProgress = () => {}) {
   if (pipe && pipeKey === model.id) return pipe;
 
   const { pipeline } = await lib();
-  const device = (await usingGpu()) ? 'webgpu' : 'wasm';
+
+  // WebAssembly by default, even where the GPU is available.
+  //
+  // Asking for WebGPU while handing it q8 weights produced a model that
+  // loaded, ran, and emitted essentially random vocabulary tokens: a phone
+  // returned 229 "words" from thirty seconds of speech, things like
+  // "biasesVIDEO" and "TwilightixirAbyss", which are Whisper's internal
+  // subword fragments rather than anything it misheard. Every check that
+  // passed had gone through the native runtime, never this backend.
+  //
+  // WebAssembly is the path that is actually verified end to end, so it is
+  // the one that ships. ?gpu=1 opts in to WebGPU at a precision it can
+  // handle, for anyone who wants to try it.
+  const wantsGpu = typeof location !== 'undefined' &&
+    new URLSearchParams(location.search).get('gpu') === '1';
+  const device = (wantsGpu && await usingGpu()) ? 'webgpu' : 'wasm';
+  const dtype = device === 'webgpu' ? 'fp32' : 'q8';
+  lastBackend = device;
 
   // The model is several files, and the callback reports each one separately.
   // Reporting one file's fraction makes the bar hit 100% over and over and
@@ -68,7 +91,7 @@ export async function load(quality = 'good', onProgress = () => {}) {
 
   pipe = await pipeline('automatic-speech-recognition', model.id, {
     device,
-    dtype: 'q8',
+    dtype,
     progress_callback: (update) => {
       if (!update || !update.file) return;
       if (update.status === 'progress' && update.total) {
