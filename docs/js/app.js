@@ -693,4 +693,5 @@ function wire() {
 wire();
 // A small debug surface: handy from the browser console, and what the
 // end-to-end tests drive the app through.
-window.ytp = { state, MODELS, addToMix, renderMix, saveVideo, exportSources };
+window.ytp = { state, MODELS, addToMix, renderMix, renderScript, saveVideo,
+               exportSources, selectClip };

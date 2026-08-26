@@ -216,3 +216,49 @@ dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
 .firstrun{font-size:12px;color:var(--ink3);margin:2px 0 0}
 
 .sheet-note{margin:12px 0 0;font-size:12px;color:var(--ink3);line-height:1.45}
+
+/* ---------- phones and narrow windows ----------
+   Two columns side by side stop working well below about 820px: each half
+   gets so narrow that the transcript wraps every two or three words. Stack
+   them instead, keep the mix as a short section at the bottom so both stay
+   visible, and size the controls for a finger rather than a mouse. */
+@media (max-width: 820px) {
+  .bar{padding:8px 10px;gap:6px;flex-wrap:wrap}
+  .brand{font-size:14px}
+  .tab,.btn{padding:7px 12px}
+
+  .cols{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
+  .col{padding:10px;gap:8px}
+  .col+.col{border-left:0;border-top:1px solid var(--line);max-height:38vh}
+
+  video{max-height:24vh}
+  #wave{height:44px}
+  #mix{max-height:22vh;padding:8px}
+
+  .empty{padding:18px 14px;gap:8px}
+  .empty h2{font-size:18px}
+  .empty p{font-size:13.5px}
+  .empty .detail{display:none}
+
+  /* words are tap targets here, not hover targets */
+  .w{padding:6px 10px;font-size:15px;touch-action:manipulation}
+  #script{line-height:2.5}
+
+  /* a fingertip is about 9mm; a 3px grab bar is not */
+  .zoom-strip{height:96px}
+  .handle{width:26px;margin-left:-13px}
+  .handle::before{left:11px}
+  .handle::after{left:0;width:26px;height:42px;margin-top:-21px;border-radius:6px}
+  .zoom-hint{display:none}
+  .syl{padding:7px 14px;font-size:13px}
+
+  .chip{height:34px;font-size:13.5px}
+  .sheet-opts .btn{padding:12px 14px}
+}
+
+/* Very narrow: the top bar needs its own row for the clip tabs. */
+@media (max-width: 420px) {
+  .brand{width:100%;margin-bottom:2px}
+  .empty h2{font-size:16px}
+  video{max-height:20vh}
+}
