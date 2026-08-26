@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import media, render, store, transcribe
+from . import media, render, store, syllables, transcribe
 
 WEB = Path(__file__).parent / "web"
 
@@ -231,6 +231,38 @@ async def get_export(name: str):
     if not path.exists():
         raise HTTPException(404, "no such file")
     return FileResponse(path, filename=path.name)
+
+@app.get("/api/clips/{clip_id}/word")
+async def get_word_detail(clip_id: str, s: float, e: float, pad: float = 0.3):
+    """Everything the zoom strip needs to let you cut inside one word."""
+    clip = store.load(clip_id)
+    if clip is None or not clip.wav_path.exists():
+        raise HTTPException(404, "no such clip")
+    if e <= s:
+        raise HTTPException(400, "that selection has no length")
+
+    rate = media.SAMPLE_RATE
+    samples = media.read_wav(clip.wav_path)
+    total = samples.size / rate
+
+    view_from = max(0.0, s - pad)
+    view_to = min(total, e + pad)
+    view = samples[int(view_from * rate):int(view_to * rate)]
+    word = samples[int(s * rate):int(e * rate)]
+
+    return {
+        "s": s,
+        "e": e,
+        "from": round(view_from, 4),
+        "to": round(view_to, 4),
+        "peaks": media.peaks(view, 900),
+        # both lists are absolute times, so the browser can use them directly
+        "syllables": [
+            {"s": round(s + a, 4), "e": round(s + b, 4)}
+            for a, b in syllables.split(word, rate)
+        ],
+        "snaps": [round(view_from + t, 4) for t in syllables.snap_points(view, rate)],
+    }
 
 @app.get("/api/health")
 async def health():

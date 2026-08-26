@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YTP Maker</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127927;</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -33,7 +31,31 @@
 
       <div id="loaded" hidden>
         <video id="video" playsinline></video>
+        <p class="novideo" id="novideo" hidden>
+          Your browser can&rsquo;t show this video&rsquo;s picture &mdash; the sound
+          still works, so everything else here is fine.
+        </p>
         <canvas id="wave"></canvas>
+      </div>
+
+      <div id="zoom" hidden>
+        <div class="zoom-head">
+          <span class="zoom-word" id="zoomWord"></span>
+          <span class="spacer"></span>
+          <span class="zoom-time mono" id="zoomTime"></span>
+        </div>
+        <div class="zoom-strip" id="zoomStrip">
+          <canvas id="zoomWave"></canvas>
+          <div class="handle" id="hStart" tabindex="0" role="slider" aria-label="start of selection"></div>
+          <div class="handle" id="hEnd" tabindex="0" role="slider" aria-label="end of selection"></div>
+        </div>
+        <div class="zoom-acts">
+          <button class="btn ghost" id="zoomPlay">&#9654; hear it</button>
+          <button class="btn" id="zoomAdd">+ add to mix</button>
+          <span class="spacer"></span>
+          <span class="zoom-hint">drag the edges &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> nudge &middot; hold <kbd>Alt</kbd> for no snapping</span>
+        </div>
+        <div class="sylls" id="sylls"></div>
       </div>
 
       <div class="status" id="status" hidden>
