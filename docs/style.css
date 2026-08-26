@@ -342,3 +342,7 @@ dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
 @supports not (background: color-mix(in srgb, red 50%, transparent)){
   .drop-marker{box-shadow:none}
 }
+
+/* the duplicate button reads as an addition, not another arrow */
+.nudge.dup{font-size:14px;font-weight:700;opacity:.45}
+.nudge.dup:hover{opacity:1;background:var(--lime-soft);color:var(--lime)}

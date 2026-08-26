@@ -249,6 +249,20 @@ function renderMix() {
       right.addEventListener('click', (ev) => { ev.stopPropagation(); shift(item, 1); });
       chip.appendChild(right);
 
+      const copy = document.createElement('button');
+      copy.className = 'nudge dup';
+      copy.textContent = '+';
+      copy.title = 'another one of these';
+      copy.setAttribute('aria-label', `duplicate ${item.w}`);
+      copy.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const at = state.mix.indexOf(item);
+        state.caret = at < 0 ? state.mix.length : at + 1;
+        insertIntoMix([{ clipId: item.clipId, s: item.s, e: item.e, w: item.w }]);
+        audition(item.clipId, item.s, item.e, null);
+      });
+      chip.appendChild(copy);
+
       const x = document.createElement('button');
       x.className = 'x';
       x.innerHTML = '&times;';
@@ -273,8 +287,19 @@ function renderMix() {
 
       chip.addEventListener('click', () => audition(item.clipId, item.s, item.e, chip));
       chip.addEventListener('dragstart', (ev) => {
-        ev.dataTransfer.setData('text/ytp-key', item.key);
-        chip.classList.add('dragging');
+        // Hold Alt or Ctrl to leave the original where it is and drag a copy.
+        // Repeating a word is half of what sentence mixing is.
+        const copying = ev.altKey || ev.ctrlKey || ev.metaKey;
+        if (copying) {
+          ev.dataTransfer.setData('text/ytp-word', JSON.stringify({
+            clipId: item.clipId, s: item.s, e: item.e, w: item.w,
+          }));
+          ev.dataTransfer.effectAllowed = 'copy';
+        } else {
+          ev.dataTransfer.setData('text/ytp-key', item.key);
+          ev.dataTransfer.effectAllowed = 'move';
+          chip.classList.add('dragging');
+        }
       });
       chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
       box.appendChild(chip);
@@ -682,6 +707,10 @@ function renderScript() {
     el.draggable = true;
     el.addEventListener('dragstart', (ev) => {
       ev.dataTransfer.setData('text/ytp-word', JSON.stringify(payload));
+      // Taking a word from the transcript copies it: the transcript is the
+      // source and never loses anything. Saying so gets the browser to show
+      // a copy pointer rather than a move one.
+      ev.dataTransfer.effectAllowed = 'copy';
     });
     el.addEventListener('click', () => {
       state.selected = payload;
