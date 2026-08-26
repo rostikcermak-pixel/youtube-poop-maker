@@ -4,6 +4,8 @@ import { peaks, snapPoints, splitSyllables } from './analysis.js';
 import { RATE, decodeTo16kMono, mixdown, toWav } from './audio.js';
 import { MODELS, listen, usingGpu } from './asr.js';
 import { recordMix, supported as canRecord } from './export.js';
+import { load as loadSounds, soundsOf, tidy } from './phonemes.js';
+import { indexSounds, planWord } from './wordbuild.js';
 
 const FADE = 0.008;          // every cut gets this. never optional.
 const SNAP_PULL = 0.035;     // how close a handle gets before it sticks
@@ -19,7 +21,9 @@ const state = {
   selected: null,
   zoom: null,
   mix: [],
+  caret: 0,               // where the next thing lands in the mix
   playing: null,
+  sounds: null,           // cached index of every sound in every clip
 };
 
 let ctx = null;
@@ -85,15 +89,16 @@ function audition(clipId, s, e, el) {
   state.playing = { nodes: [node], timers: [setTimeout(stopAll, (e - s) * 1000 + 60)] };
 }
 
-function playMix() {
-  if (!state.mix.length) return;
+/** Play a run of pieces back to back. Used by the mix and by previews. */
+function playPieces(list, { highlight = false } = {}) {
+  if (!list.length) return;
   stopAll();
   const nodes = [];
   const timers = [];
   let at = audio().currentTime + 0.05;
   const v = $('video');
 
-  state.mix.forEach((item, i) => {
+  list.forEach((item, i) => {
     const buf = bufferFor(item.clipId);
     if (!buf) return;
     const node = schedule(buf, at, item.s, item.e);
@@ -101,7 +106,7 @@ function playMix() {
     const lead = (at - audio().currentTime) * 1000;
     timers.push(setTimeout(() => {
       document.querySelectorAll('.chip.on').forEach((c) => c.classList.remove('on'));
-      const chip = $('mix').children[i];
+      const chip = highlight ? $('mix').querySelectorAll('.chip')[i] : null;
       if (chip) chip.classList.add('on');
       if (v && item.clipId === state.activeId && v.src) {
         v.currentTime = item.s;
@@ -113,25 +118,47 @@ function playMix() {
 
   timers.push(setTimeout(stopAll, (at - audio().currentTime) * 1000 + 80));
   state.playing = { nodes, timers };
-  $('play').innerHTML = '&#9632; stop';
+  if (highlight) $('play').innerHTML = '&#9632; stop';
+}
+
+function playMix() {
+  playPieces(state.mix, { highlight: true });
 }
 
 /* -------------------------------------------------------------------- mix */
 
 const mixDuration = () => state.mix.reduce((sum, m) => sum + (m.e - m.s), 0);
 
-function addToMix(clipId, s, e, w) {
-  state.mix.push({ key: Math.random().toString(36).slice(2), clipId, s, e, w });
+/** Put pieces in at the caret, then leave the caret after what was added. */
+function insertIntoMix(pieces) {
+  const items = pieces.map((p) => ({ key: Math.random().toString(36).slice(2), ...p }));
+  const at = Math.max(0, Math.min(state.caret, state.mix.length));
+  state.mix.splice(at, 0, ...items);
+  state.caret = at + items.length;
   renderMix();
+}
+
+function addToMix(clipId, s, e, w) {
+  insertIntoMix([{ clipId, s, e, w }]);
+}
+
+function caretMark() {
+  const mark = document.createElement('span');
+  mark.className = 'caret';
+  mark.title = 'the next word lands here';
+  return mark;
 }
 
 function renderMix() {
   const box = $('mix');
   box.innerHTML = '';
+  state.caret = Math.max(0, Math.min(state.caret, state.mix.length));
+
   if (!state.mix.length) {
     box.innerHTML = '<p class="mix-empty">Double-click a word on the left and it lands here.</p>';
   } else {
-    state.mix.forEach((item) => {
+    state.mix.forEach((item, index) => {
+      if (index === state.caret) box.appendChild(caretMark());
       const chip = document.createElement('div');
       chip.className = 'chip';
       chip.draggable = true;
@@ -147,7 +174,9 @@ function renderMix() {
       x.title = 'remove';
       x.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        const gone = state.mix.findIndex((m) => m.key === item.key);
         state.mix = state.mix.filter((m) => m.key !== item.key);
+        if (gone > -1 && gone < state.caret) state.caret -= 1;
         renderMix();
       });
       chip.appendChild(x);
@@ -160,6 +189,7 @@ function renderMix() {
       chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
       box.appendChild(chip);
     });
+    if (state.caret >= state.mix.length) box.appendChild(caretMark());
   }
   $('play').disabled = !state.mix.length;
   $('clear').disabled = !state.mix.length;
@@ -173,6 +203,22 @@ function keyAtPoint(x, y) {
     if (y >= r.top && y <= r.bottom && x < r.left + r.width / 2) return chip.dataset.key;
   }
   return null;
+}
+
+/** Clicking between chips is how you choose where the next word goes. */
+function wireCaret() {
+  $('mix').addEventListener('click', (ev) => {
+    if (ev.target.closest('.chip')) return;      // clicking a chip plays it
+    const chips = [...$('mix').querySelectorAll('.chip')];
+    let at = chips.length;
+    for (let i = 0; i < chips.length; i++) {
+      const r = chips[i].getBoundingClientRect();
+      const past = ev.clientY > r.bottom || (ev.clientY >= r.top && ev.clientX > r.left + r.width / 2);
+      if (!past) { at = i; break; }
+    }
+    state.caret = at;
+    renderMix();
+  });
 }
 
 function wireMixDrop() {
@@ -525,6 +571,116 @@ async function importFile(file) {
   }
 }
 
+/* --------------------------------------------- making a word he never said */
+
+/** Every sound in every loaded clip, indexed so runs of them can be found. */
+function soundsIndex() {
+  const signature = state.clips.map((c) => `${c.id}:${(c.words || []).length}`).join(',');
+  if (state.sounds && state.sounds.signature === signature) return state.sounds.index;
+
+  const words = [];
+  for (const clip of state.clips) {
+    for (const word of clip.words || []) {
+      const phones = soundsOf(word.w);
+      if (phones) {
+        words.push({ w: word.w, phones, clipId: clip.id, s: word.s, e: word.e });
+      }
+    }
+  }
+  const index = indexSounds(words);
+  state.sounds = { signature, index, counted: words.length };
+  return index;
+}
+
+function note(text, bad) {
+  const out = $('makeOut');
+  out.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = 'maker-note' + (bad ? ' bad' : '');
+  p.textContent = text;
+  out.appendChild(p);
+}
+
+function showOptions(target, options) {
+  const out = $('makeOut');
+  out.innerHTML = '';
+
+  options.forEach((option) => {
+    const row = document.createElement('div');
+    row.className = 'option';
+
+    const how = document.createElement('span');
+    how.className = 'how';
+    how.innerHTML = option.pieces
+      .map((piece) => `<b>${piece.from}</b>`)
+      .join(' + ');
+    row.appendChild(how);
+
+    const joins = document.createElement('span');
+    joins.className = 'joins';
+    joins.textContent = option.joins === 0 ? 'as said' : `${option.joins} join${option.joins > 1 ? 's' : ''}`;
+    row.appendChild(joins);
+
+    const hear = document.createElement('button');
+    hear.innerHTML = '&#9654;';
+    hear.title = 'hear it';
+    hear.addEventListener('click', () => playPieces(option.pieces));
+    row.appendChild(hear);
+
+    const use = document.createElement('button');
+    use.className = 'use';
+    use.textContent = 'insert';
+    use.title = 'put it in the mix where the caret is';
+    use.addEventListener('click', () => {
+      insertIntoMix(option.pieces.map((piece, i) => ({
+        clipId: piece.clipId,
+        s: piece.s,
+        e: piece.e,
+        // one word can span several clips, so only the first chip carries the
+        // name and the rest read as a continuation of it
+        w: i === 0 ? target : '\u2026',
+      })));
+    });
+    row.appendChild(use);
+
+    out.appendChild(row);
+  });
+}
+
+async function makeWord() {
+  const raw = $('makeWord').value;
+  const target = tidy(raw);
+  if (!target) return;
+
+  const ready = state.clips.some((c) => (c.words || []).length);
+  if (!ready) {
+    note('Load a video first, so there are some sounds to build it out of.', true);
+    return;
+  }
+
+  note('Looking up how that is said\u2026');
+  try {
+    await loadSounds();
+  } catch (err) {
+    note("Couldn't load the pronunciation dictionary. Check your connection.", true);
+    return;
+  }
+
+  const phones = soundsOf(target);
+  if (!phones) {
+    note(`I don't know how "${raw.trim()}" is pronounced, so I can't build it.`, true);
+    return;
+  }
+
+  const options = planWord(phones, soundsIndex());
+  if (!options.length) {
+    note(`There aren't enough of the right sounds in this video to make "${target}". `
+       + 'Try loading another clip as well.', true);
+    return;
+  }
+  showOptions(target, options);
+}
+
 /* ----------------------------------------------------------------- saving */
 
 function download(blob, name) {
@@ -629,7 +785,17 @@ function wire() {
   });
 
   $('play').addEventListener('click', () => { if (state.playing) stopAll(); else playMix(); });
-  $('clear').addEventListener('click', () => { state.mix = []; stopAll(); renderMix(); });
+  $('clear').addEventListener('click', () => {
+    state.mix = [];
+    state.caret = 0;
+    stopAll();
+    renderMix();
+  });
+
+  $('makeGo').addEventListener('click', makeWord);
+  $('makeWord').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); makeWord(); }
+  });
 
   $('save').addEventListener('click', () => {
     $('saveInfo').textContent =
@@ -686,6 +852,7 @@ function wire() {
     if (state.zoom) drawZoom();
   });
 
+  wireCaret();
   wireMixDrop();
   renderMix();
 }
