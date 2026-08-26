@@ -3,6 +3,7 @@
 import { peaks, snapPoints, splitSyllables } from './analysis.js';
 import { RATE, decodeTo16kMono, mixdown, toWav } from './audio.js';
 import { MODELS, listen, usingGpu } from './asr.js';
+import { recordMix, supported as canRecord } from './export.js';
 
 const FADE = 0.008;          // every cut gets this. never optional.
 const SNAP_PULL = 0.035;     // how close a handle gets before it sticks
@@ -536,6 +537,58 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 }
 
+/** A muted, off-screen video per clip, so export can pull frames from any of them. */
+function exportSources() {
+  const map = new Map();
+  for (const clip of state.clips) {
+    if (!clip.samples.length) continue;
+    if (!clip.exportVideo) {
+      const el = document.createElement('video');
+      el.src = clip.url;
+      el.muted = true;
+      el.playsInline = true;
+      el.preload = 'auto';
+      el.style.cssText = 'position:fixed;left:-9999px;width:2px;height:2px';
+      document.body.appendChild(el);
+      clip.exportVideo = el;
+    }
+    map.set(clip.id, { samples: clip.samples, rate: RATE, video: clip.exportVideo });
+  }
+  return map;
+}
+
+async function saveVideo(height) {
+  const note = $('saveState');
+  const buttons = [...$('saveSheet').querySelectorAll('.btn')];
+  buttons.forEach((b) => { b.disabled = true; });
+  note.hidden = false;
+  note.className = 'sheet-state';
+  note.textContent = 'Getting ready…';
+
+  try {
+    if (!canRecord()) {
+      throw new Error("This browser can't record video. Try Chrome or Edge, or save just the sound.");
+    }
+    stopAll();
+    const width = Math.round((height * 16) / 9 / 2) * 2;
+    const { blob, name, seconds } = await recordMix(state.mix, exportSources(), {
+      width,
+      height,
+      onProgress: (fraction) => {
+        note.textContent = `Saving your video, ${Math.round(fraction * 100)}%…`;
+      },
+    });
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T-]/g, '');
+    download(blob, name.replace('poop.', `poop-${stamp}.`));
+    note.textContent = `Saved ${seconds.toFixed(2)}s, ${(blob.size / 1e6).toFixed(1)} MB.`;
+  } catch (err) {
+    note.className = 'sheet-state bad';
+    note.textContent = String(err && err.message ? err.message : err);
+  } finally {
+    buttons.forEach((b) => { b.disabled = false; });
+  }
+}
+
 function saveMix() {
   const note = $('saveState');
   note.hidden = false;
@@ -587,6 +640,8 @@ function wire() {
   $('saveClose').addEventListener('click', () => $('saveSheet').close());
   $('saveSheet').querySelectorAll('[data-audio]').forEach((b) =>
     b.addEventListener('click', saveMix));
+  $('saveSheet').querySelectorAll('[data-video]').forEach((b) =>
+    b.addEventListener('click', () => saveVideo(Number(b.dataset.video))));
 
   dragHandle($('hStart'), 'start');
   dragHandle($('hEnd'), 'end');
@@ -636,4 +691,6 @@ function wire() {
 }
 
 wire();
-window.ytp = { state, MODELS };     // handy from the console, and for tests
+// A small debug surface: handy from the browser console, and what the
+// end-to-end tests drive the app through.
+window.ytp = { state, MODELS, addToMix, renderMix, saveVideo, exportSources };
