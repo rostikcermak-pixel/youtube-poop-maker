@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # The suite covers the pure analysis and render-graph code. It needs
+      # imageio-ffmpeg because building the render command resolves the
+      # ffmpeg binary path, but not faster-whisper or the web server deps,
+      # which would add minutes for nothing these tests exercise.
+      - run: pip install numpy pytest imageio-ffmpeg
+      - run: python -m pytest tests/ -q
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/js/*.test.js
