@@ -139,53 +139,68 @@ function snapEdge(env, raw, lo, hi, rate) {
  * while the word beside it holds the whole shared span. Left alone, clicking
  * that word plays silence.
  */
-export function repair(words) {
+export function repair(words, total = null) {
   const healthy = words.filter((w) => w.e - w.s >= MIN_WORD && w.w);
   if (healthy.length < 3) return words;
-
-  const rates = healthy.map((w) => (w.e - w.s) / w.w.length).sort((a, b) => a - b);
-  const perChar = rates[Math.floor(rates.length / 2)];
-  if (!(perChar > 0)) return words;
 
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (word.e - word.s >= MIN_WORD) continue;
 
-    // The word's time is often not in a neighbour at all — it's sitting in an
-    // unclaimed gap that nothing occupies. Observed on real output: "it" came
-    // back as 10.540-10.540 with 140ms of empty space in front of it. Take
-    // the gap first, because it costs no neighbour anything.
     const prev = words[i - 1];
     const next = words[i + 1];
+
+    // Unclaimed space, which costs no neighbour anything. A word at the very
+    // end of the clip can run to the end of the audio, which is why the
+    // clip's length is worth knowing here — without it the last word has
+    // nowhere to grow and stays silent.
     const gapFrom = prev ? Math.max(prev.e, word.s) : word.s;
-    const gapTo = next ? next.s : word.e;
-    if (gapTo - gapFrom >= MIN_WORD) {
-      word.s = gapFrom;
-      word.e = gapTo;
-      continue;
-    }
+    const gapTo = next ? next.s : (total != null ? total : word.e);
+    const gapGives = gapTo - gapFrom;
 
-    for (const j of [i - 1, i + 1]) {
-      if (j < 0 || j >= words.length) continue;
-      const other = words[j];
-      const touching =
-        Math.min(Math.abs(other.e - word.s), Math.abs(word.e - other.s)) <= 0.05;
-      const bloated =
-        other.e - other.s > 1.6 * perChar * Math.max(1, other.w.length);
-      if (!touching || !bloated) continue;
+    // Or take the span shared with a neighbour and split it by how long each
+    // word is. Overlapping counts, not just touching: a starved word often
+    // sits inside its neighbour's span rather than against its edge, and
+    // testing the edges alone finds no donor and leaves it silent.
+    //
+    // The neighbour used to have to look greedy — longer than 1.6x what its
+    // own character count justified — which let the real failure through: a
+    // long word holding 1.4s for itself and the word after it still measured
+    // as innocent. A word with no time at all is evidence enough.
+    let split = null;
+    const donors = [prev, next]
+      .filter((other) => other &&
+        other.s <= word.e + 0.05 && word.s <= other.e + 0.05)
+      .sort((a, b) => (b.e - b.s) - (a.e - a.s));
 
-      const first = j < i ? other : word;
-      const second = j < i ? word : other;
+    for (const other of donors) {
       const lo = Math.min(word.s, other.s);
       const hi = Math.max(word.e, other.e);
       if (hi - lo < 2 * MIN_WORD) continue;
 
-      const a = Math.max(1, first.w.length);
-      const b = Math.max(1, second.w.length);
-      const cut = lo + (hi - lo) * (a / (a + b));
-      first.s = lo; first.e = cut;
-      second.s = cut; second.e = hi;
+      const before = words.indexOf(other) < i;
+      const mine = Math.max(1, word.w.length);
+      const theirs = Math.max(1, other.w.length);
+      const share = before ? theirs / (mine + theirs) : mine / (mine + theirs);
+      let cut = lo + (hi - lo) * share;
+      cut = Math.min(Math.max(cut, lo + MIN_WORD), hi - MIN_WORD);
+
+      split = { other, before, lo, hi, cut, gives: before ? hi - cut : cut - lo };
       break;
+    }
+
+    // Free space wins unless it is markedly worse than what a split would
+    // give. Taking a 0.1s gap while the neighbour sits on 1.4s leaves a word
+    // too short to hear, which is barely better than silence.
+    const useGap = gapGives >= MIN_WORD && (!split || gapGives >= split.gives * 0.6);
+    if (useGap) {
+      word.s = gapFrom;
+      word.e = gapTo;
+    } else if (split) {
+      const first = split.before ? split.other : word;
+      const second = split.before ? word : split.other;
+      first.s = split.lo; first.e = split.cut;
+      second.s = split.cut; second.e = split.hi;
     }
   }
   return words;

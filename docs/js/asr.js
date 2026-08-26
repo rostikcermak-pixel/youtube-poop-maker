@@ -223,11 +223,11 @@ export async function listen(samples, {
     at = to;
     // Hand back a tightened copy so what appears mid-run is usable, while the
     // running list stays raw for the next window to append to.
-    onWords(tighten(repair(words.map((w) => ({ ...w }))), samples, RATE), at / total);
+    onWords(tighten(repair(words.map((w) => ({ ...w })), total), samples, RATE), at / total);
     await new Promise((r) => setTimeout(r, 0));   // let the page paint
   }
 
   if (!words.length) throw new Error("I couldn't hear any talking in this one.");
 
-  return tighten(repair(words), samples, RATE);
+  return tighten(repair(words, total), samples, RATE);
 }

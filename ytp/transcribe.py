@@ -89,56 +89,80 @@ def _snap(energy: np.ndarray, raw: float, lo: float, hi: float) -> float:
     return float(times[int(np.argmin(score))])
 
 
-def repair(words: list[dict]) -> list[dict]:
-    """Rescue words Whisper collapsed to nothing.
+def repair(words: list[dict], total: float | None = None) -> list[dict]:
+    """Rescue words the recogniser collapsed to nothing.
 
-    Alignment sometimes fails on a long or unusual word: it comes back with
-    zero duration while the word beside it holds the whole shared span. Left
-    alone, clicking that word plays silence. When a neighbour is carrying
-    obviously more time than its own length justifies, split the span they
-    share in proportion to how many characters each word has.
+    Alignment sometimes fails: a word comes back with no duration while the
+    word beside it holds the whole shared span. Left alone, clicking that
+    word plays silence, and clicking its neighbour plays both.
     """
     healthy = [w for w in words if w["e"] - w["s"] >= MIN_WORD and w["w"]]
     if len(healthy) < 3:
-        return words
-    per_char = float(np.median([(w["e"] - w["s"]) / len(w["w"]) for w in healthy]))
-    if per_char <= 0:
         return words
 
     for i, word in enumerate(words):
         if word["e"] - word["s"] >= MIN_WORD:
             continue
 
-        # The word's time is often not in a neighbour at all — it's sitting in
-        # an unclaimed gap that nothing occupies. Observed on real output: "it"
-        # came back as 10.540-10.540 with 140 ms of empty space in front of it.
-        # Take the gap first, because it costs no neighbour anything.
         prev = words[i - 1] if i > 0 else None
         nxt = words[i + 1] if i + 1 < len(words) else None
+
+        # Unclaimed space, which costs no neighbour anything. A word at the
+        # very end of the clip can run to the end of the audio, which is why
+        # the clip's length is worth knowing here — without it the last word
+        # has nowhere to grow and stays silent.
         gap_from = max(prev["e"], word["s"]) if prev else word["s"]
-        gap_to = nxt["s"] if nxt else word["e"]
-        if gap_to - gap_from >= MIN_WORD:
-            word["s"], word["e"] = gap_from, gap_to
-            continue
+        gap_to = nxt["s"] if nxt else (total if total is not None else word["e"])
+        gap_gives = gap_to - gap_from
 
-        for j in (i - 1, i + 1):
-            if not 0 <= j < len(words):
-                continue
-            other = words[j]
-            touching = min(abs(other["e"] - word["s"]), abs(word["e"] - other["s"])) <= 0.05
-            bloated = (other["e"] - other["s"]) > 1.6 * per_char * max(1, len(other["w"]))
-            if not (touching and bloated):
-                continue
+        # Or take the span shared with a neighbour and split it by how long
+        # each word is. Overlapping counts, not just touching: a starved word
+        # often sits inside its neighbour's span rather than against its edge,
+        # and testing the edges alone finds no donor and leaves it silent.
+        #
+        # The neighbour used to have to look greedy — longer than 1.6x what
+        # its own character count justified — which let the real failure
+        # through: a long word holding 1.4 s for itself and the word after it
+        # still measured as innocent. A word with no time is evidence enough.
+        split = None
+        donors = [
+            other for other in (prev, nxt)
+            if other is not None
+            and other["s"] <= word["e"] + 0.05
+            and word["s"] <= other["e"] + 0.05
+        ]
+        donors.sort(key=lambda o: o["e"] - o["s"], reverse=True)
 
-            first, second = (words[j], words[i]) if j < i else (words[i], words[j])
-            lo, hi = min(word["s"], other["s"]), max(word["e"], other["e"])
+        for other in donors:
+            lo = min(word["s"], other["s"])
+            hi = max(word["e"], other["e"])
             if hi - lo < 2 * MIN_WORD:
                 continue
-            share = max(1, len(first["w"])) / (max(1, len(first["w"])) + max(1, len(second["w"])))
+
+            before = other is prev
+            mine = max(1, len(word["w"]))
+            theirs = max(1, len(other["w"]))
+            share = theirs / (mine + theirs) if before else mine / (mine + theirs)
             cut = lo + (hi - lo) * share
-            first["s"], first["e"] = lo, cut
-            second["s"], second["e"] = cut, hi
+            cut = min(max(cut, lo + MIN_WORD), hi - MIN_WORD)
+
+            split = {
+                "other": other, "before": before, "lo": lo, "hi": hi, "cut": cut,
+                "gives": (hi - cut) if before else (cut - lo),
+            }
             break
+
+        # Free space wins unless it is markedly worse than what a split would
+        # give. Taking a 0.1 s gap while the neighbour sits on 1.4 s leaves a
+        # word too short to hear, which is barely better than silence.
+        if gap_gives >= MIN_WORD and (split is None or gap_gives >= split["gives"] * 0.6):
+            word["s"], word["e"] = gap_from, gap_to
+        elif split is not None:
+            first = split["other"] if split["before"] else word
+            second = word if split["before"] else split["other"]
+            first["s"], first["e"] = split["lo"], split["cut"]
+            second["s"], second["e"] = split["cut"], split["hi"]
+
     return words
 
 
@@ -242,7 +266,7 @@ def listen_samples(samples: np.ndarray) -> list[dict]:
                     "p": round(float(w.probability), 3),
                 }
             )
-    return tighten(repair(words), samples)
+    return tighten(repair(words, samples.size / SAMPLE_RATE), samples)
 
 
 def listen(
@@ -278,4 +302,4 @@ def listen(
             # Report the raw timings while streaming; tighten once at the end.
             on_progress(list(words), float(segment.end))
 
-    return tighten(repair(words), samples)
+    return tighten(repair(words, samples.size / SAMPLE_RATE), samples)

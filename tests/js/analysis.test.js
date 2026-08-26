@@ -216,3 +216,59 @@ test('tightening never guts a word', () => {
   const kept = out[0].e - out[0].s;
   assert.ok(kept >= 0.42 * 0.5, `tightening cut the word to ${kept.toFixed(3)}s of 0.42s`);
 });
+
+test('a starved word takes time back from a greedy neighbour', () => {
+  // Reported symptom: clicking one word played it and the word after it,
+  // while clicking that next word played nothing at all. The neighbour was
+  // holding both spans and the starved word had none.
+  const words = [
+    { i: 0, w: 'one', s: 0.2, e: 0.5, p: 1 },
+    { i: 1, w: 'two', s: 0.6, e: 0.9, p: 1 },
+    { i: 2, w: 'three', s: 1.0, e: 1.2, p: 1 },
+    { i: 3, w: 'greedy', s: 1.3, e: 2.7, p: 1 },
+    { i: 4, w: 'starved', s: 2.7, e: 2.7, p: 1 },
+    { i: 5, w: 'after', s: 2.8, e: 3.1, p: 1 },
+  ];
+
+  const out = repair(words, 3.2);
+  const starved = out.find((w) => w.w === 'starved');
+  const greedy = out.find((w) => w.w === 'greedy');
+
+  assert.ok(starved.e - starved.s > 0.2,
+    `starved word only got ${(starved.e - starved.s).toFixed(3)}s, too short to hear`);
+  assert.ok(greedy.e <= starved.s + 1e-6, 'the two still overlap');
+  assert.equal(out.find((w) => w.w === 'after').s, 2.8, 'took from an innocent word');
+});
+
+test('a starved word inside its neighbour is still rescued', () => {
+  // It often sits within the neighbour's span rather than against its edge,
+  // so testing whether the edges touch finds no donor and leaves it silent.
+  const words = [
+    { i: 0, w: 'one', s: 0.2, e: 0.5, p: 1 },
+    { i: 1, w: 'two', s: 0.6, e: 0.9, p: 1 },
+    { i: 2, w: 'three', s: 1.0, e: 1.2, p: 1 },
+    { i: 3, w: 'greedy', s: 1.3, e: 2.7, p: 1 },
+    { i: 4, w: 'buried', s: 1.9, e: 1.9, p: 1 },
+  ];
+
+  const out = repair(words, 3.2);
+  const buried = out.find((w) => w.w === 'buried');
+
+  assert.ok(buried.e - buried.s > 0.2,
+    `buried word only got ${(buried.e - buried.s).toFixed(3)}s`);
+});
+
+test('a starved last word can run to the end of the clip', () => {
+  const words = [
+    { i: 0, w: 'one', s: 0.2, e: 0.5, p: 1 },
+    { i: 1, w: 'two', s: 0.6, e: 0.9, p: 1 },
+    { i: 2, w: 'three', s: 1.0, e: 1.2, p: 1 },
+    { i: 3, w: 'last', s: 1.3, e: 1.3, p: 1 },
+  ];
+
+  const out = repair(words, 2.5);
+  const last = out[out.length - 1];
+
+  assert.ok(last.e - last.s > 0.2, 'the last word had nowhere to grow');
+  assert.ok(last.e <= 2.5 + 1e-9, 'it ran past the end of the audio');
+});

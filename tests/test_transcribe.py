@@ -167,3 +167,43 @@ def test_tightening_never_guts_a_word():
 
     kept = out[0]["e"] - out[0]["s"]
     assert kept >= 0.42 * 0.5, f"tightening cut the word to {kept:.3f}s of 0.42s"
+
+
+def test_a_starved_word_takes_time_back_from_a_greedy_neighbour():
+    """Reported symptom: clicking one word played it and the word after it,
+    while clicking that next word played nothing. The neighbour held both
+    spans and the starved word had none."""
+    words = words_from([(0.2, 0.5), (0.6, 0.9), (1.0, 1.2),
+                        (1.3, 2.7), (2.7, 2.7), (2.8, 3.1)])
+    for word, text in zip(words, ["one", "two", "three", "greedy", "starved", "after"]):
+        word["w"] = text
+
+    out = repair(words, 3.2)
+    starved = next(w for w in out if w["w"] == "starved")
+    greedy = next(w for w in out if w["w"] == "greedy")
+
+    assert starved["e"] - starved["s"] > 0.2, "too short to hear"
+    assert greedy["e"] <= starved["s"] + 1e-6, "the two still overlap"
+    assert next(w for w in out if w["w"] == "after")["s"] == 2.8
+
+
+def test_a_starved_word_inside_its_neighbour_is_still_rescued():
+    words = words_from([(0.2, 0.5), (0.6, 0.9), (1.0, 1.2), (1.3, 2.7), (1.9, 1.9)])
+    for word, text in zip(words, ["one", "two", "three", "greedy", "buried"]):
+        word["w"] = text
+
+    out = repair(words, 3.2)
+    buried = next(w for w in out if w["w"] == "buried")
+
+    assert buried["e"] - buried["s"] > 0.2
+
+
+def test_a_starved_last_word_can_run_to_the_end_of_the_clip():
+    words = words_from([(0.2, 0.5), (0.6, 0.9), (1.0, 1.2), (1.3, 1.3)])
+    for word, text in zip(words, ["one", "two", "three", "last"]):
+        word["w"] = text
+
+    out = repair(words, 2.5)
+
+    assert out[-1]["e"] - out[-1]["s"] > 0.2
+    assert out[-1]["e"] <= 2.5 + 1e-9
