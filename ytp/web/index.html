@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YTP Maker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <div class="bar">
+    <span class="brand">YTP <span class="d">Maker</span></span>
+    <span id="tabs" style="display:flex;gap:6px"></span>
+    <button class="tab" id="add">+ add video</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="save" disabled>save</button>
+  </div>
+
+  <div class="cols">
+
+    <div class="col" id="source">
+      <div class="lab">Source &mdash; where you steal from</div>
+
+      <div class="empty" id="dropzone">
+        <h2>Drop a video here</h2>
+        <p>It'll listen to the whole thing and write down every word, so you can click them.</p>
+        <button class="btn" id="pick">Choose a file</button>
+      </div>
+
+      <div id="loaded" hidden>
+        <video id="video" playsinline></video>
+        <canvas id="wave"></canvas>
+      </div>
+
+      <div class="status" id="status" hidden>
+        <span id="statusText"></span>
+        <div class="pbar"><i id="statusBar" style="width:0%"></i></div>
+      </div>
+
+      <div class="search" id="searchWrap" hidden>
+        <span style="color:var(--ink3)">&#9906;</span>
+        <input id="search" type="search" placeholder="search every word&hellip;" autocomplete="off">
+        <span class="count" id="searchCount"></span>
+      </div>
+
+      <div id="script"></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Your mix &mdash; what you're building</div>
+
+      <div class="transport">
+        <button class="btn" id="play" disabled>&#9654; play</button>
+        <button class="btn ghost" id="clear" disabled>clear</button>
+        <span class="spacer"></span>
+        <span class="time" id="mixTime">0.00s</span>
+      </div>
+
+      <div id="mix"><p class="mix-empty">Double-click a word on the left and it lands here.</p></div>
+    </div>
+
+  </div>
+</div>
+
+<input type="file" id="file" accept="video/*,audio/*" hidden>
+<script src="app.js"></script>
+</body>
+</html>
