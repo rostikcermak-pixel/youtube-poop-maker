@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YTP Maker</title>
+<meta name="description" content="Make him say things he never said. A sentence-mixing editor for YouTube Poops that runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#127927;</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <div class="bar">
+    <span class="brand">YTP <span class="d">Maker</span></span>
+    <span id="tabs" style="display:flex;gap:6px"></span>
+    <button class="tab" id="add">+ add video</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="save" disabled>save</button>
+  </div>
+
+  <div class="cols">
+
+    <div class="col" id="source">
+      <div class="lab">Source &mdash; where you steal from</div>
+
+      <div class="empty" id="dropzone">
+        <h2>Drop a video here</h2>
+        <p>
+          It listens to the whole thing and writes down every word, so you can
+          click them. Everything happens on your own computer &mdash; your video
+          is never uploaded anywhere.
+        </p>
+        <button class="btn" id="pick">Choose a file</button>
+        <p class="firstrun">First time only, it downloads about 80&nbsp;MB of speech model.</p>
+      </div>
+
+      <div id="loaded" hidden>
+        <video id="video" playsinline></video>
+        <p class="novideo" id="novideo" hidden>
+          Your browser can&rsquo;t show this video&rsquo;s picture &mdash; the sound
+          still works, so everything else here is fine.
+        </p>
+        <canvas id="wave"></canvas>
+      </div>
+
+      <div class="status" id="status" hidden>
+        <span id="statusText"></span>
+        <div class="pbar"><i id="statusBar" style="width:0%"></i></div>
+      </div>
+
+      <div id="zoom" hidden>
+        <div class="zoom-head">
+          <span class="zoom-word" id="zoomWord"></span>
+          <span class="spacer"></span>
+          <span class="zoom-time mono" id="zoomTime"></span>
+        </div>
+        <div class="zoom-strip" id="zoomStrip">
+          <canvas id="zoomWave"></canvas>
+          <div class="handle" id="hStart" tabindex="0" role="slider" aria-label="start of selection"></div>
+          <div class="handle" id="hEnd" tabindex="0" role="slider" aria-label="end of selection"></div>
+        </div>
+        <div class="zoom-acts">
+          <button class="btn ghost" id="zoomPlay">&#9654; hear it</button>
+          <button class="btn" id="zoomAdd">+ add to mix</button>
+          <span class="spacer"></span>
+          <span class="zoom-hint">drag the edges &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> nudge &middot; hold <kbd>Alt</kbd> for no snapping</span>
+        </div>
+        <div class="sylls" id="sylls"></div>
+      </div>
+
+      <div class="search" id="searchWrap" hidden>
+        <span style="color:var(--ink3)">&#9906;</span>
+        <input id="search" type="search" placeholder="search every word&hellip;" autocomplete="off">
+        <span class="count" id="searchCount"></span>
+      </div>
+
+      <div id="script"></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Your mix &mdash; what you're building</div>
+
+      <div class="transport">
+        <button class="btn" id="play" disabled>&#9654; play</button>
+        <button class="btn ghost" id="clear" disabled>clear</button>
+        <span class="spacer"></span>
+        <span class="time" id="mixTime">0.00s</span>
+      </div>
+
+      <div id="mix"><p class="mix-empty">Double-click a word on the left and it lands here.</p></div>
+    </div>
+
+  </div>
+</div>
+
+<dialog id="saveSheet">
+  <h3>Save your mix</h3>
+  <p id="saveInfo" class="sheet-sub"></p>
+  <div class="sheet-opts">
+    <button class="btn ghost" data-video="480">Video &mdash; small (480p)</button>
+    <button class="btn ghost" data-video="720">Video &mdash; 720p</button>
+    <button class="btn ghost" data-audio="1">Just the sound (WAV)</button>
+  </div>
+  <p class="sheet-note" id="saveNote">Saving a video plays the mix through once, so it
+    takes about as long as the mix lasts.</p>
+  <p id="saveState" class="sheet-state" hidden></p>
+  <div class="sheet-foot"><button class="btn ghost" id="saveClose">cancel</button></div>
+</dialog>
+
+<input type="file" id="file" accept="video/*,audio/*" hidden>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

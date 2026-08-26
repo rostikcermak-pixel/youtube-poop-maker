@@ -1,0 +1,214 @@
+/* No web fonts: this runs locally and must work with no internet.
+   A CDN link fails closed, delays first paint, and tells a third
+   party when the app is being used. */
+:root{
+  --ink:#16151f; --ink2:#4a4760; --ink3:#807d95;
+  --ground:#f7f6fb; --panel:#fff; --sunk:#efedf6;
+  --line:#e2e0ec; --line2:#d3d0e2;
+  --violet:#4b3bff; --violet-soft:#eae7ff; --violet-ink:#3226c9;
+  --lime:#5f7a00; --lime-bar:#a3d100; --lime-soft:#f1f7d9;
+  --warn:#b8430a; --warn-soft:#fdeee4;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ink:#eceaf5; --ink2:#a8a4c0; --ink3:#7f7c96;
+    --ground:#0f0e17; --panel:#191824; --sunk:#131220;
+    --line:#2b2939; --line2:#3a3750;
+    --violet:#9c91ff; --violet-soft:#241f4a; --violet-ink:#b6adff;
+    --lime:#bfe62e; --lime-bar:#a8cf27; --lime-soft:#1f2610;
+    --warn:#f89563; --warn-soft:#2e1a10;
+  }
+}
+*{box-sizing:border-box}
+/* A class with its own display beats the UA rule for [hidden], and every
+   panel here is flex, so hiding one needs to win explicitly. */
+[hidden]{display:none!important}
+html,body{height:100%}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;overflow:hidden;
+}
+.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--violet);outline-offset:2px}
+
+/* ---------- shell ---------- */
+#app{display:flex;flex-direction:column;height:100vh}
+.bar{
+  display:flex;align-items:center;gap:8px;padding:9px 14px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex:none;
+}
+.brand{font-weight:700;letter-spacing:-.02em;margin-right:6px}
+.brand .d{color:var(--lime-bar)}
+.spacer{flex:1}
+.tab{
+  padding:5px 12px;border-radius:7px;border:1px solid var(--line2);
+  background:var(--panel);color:var(--ink2);font-size:13px;max-width:190px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.tab:hover{border-color:var(--violet)}
+.tab.on{background:var(--violet);border-color:var(--violet);color:#fff;font-weight:600}
+.tab.busy{opacity:.7}
+.btn{
+  padding:6px 14px;border-radius:7px;border:1px solid var(--violet);
+  background:var(--violet);color:#fff;font-weight:600;font-size:13px;
+}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;color:var(--violet-ink);border-color:var(--line2)}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+
+.cols{display:grid;grid-template-columns:1fr 1fr;flex:1;min-height:0}
+.col{
+  display:flex;flex-direction:column;min-height:0;min-width:0;
+  padding:14px;gap:10px;overflow:hidden;
+}
+/* the video and the zoom strip keep their size; the transcript takes the rest */
+#loaded{display:flex;flex-direction:column;gap:10px;flex:none}
+.col+.col{border-left:1px solid var(--line)}
+.lab{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink3);font-weight:700;flex:none;
+}
+
+/* ---------- source ---------- */
+video{
+  width:100%;max-height:30vh;background:#000;border-radius:8px;
+  border:1px solid var(--line);aspect-ratio:16/9;flex:none;object-fit:contain;
+}
+#wave{
+  width:100%;height:54px;flex:none;border-radius:6px;
+  background:var(--sunk);border:1px solid var(--line);cursor:pointer;display:block;
+}
+.search{
+  display:flex;align-items:center;gap:8px;flex:none;
+  border:1px solid var(--line2);border-radius:8px;padding:0 10px;background:var(--panel);
+}
+.search input{
+  flex:1;border:0;background:transparent;color:inherit;font:inherit;
+  padding:8px 0;outline:none;
+}
+.search .count{font-size:12px;color:var(--ink3);white-space:nowrap}
+
+#script{
+  flex:1 1 auto;overflow-y:auto;line-height:2.35;padding:4px 2px 24px;
+  min-height:64px;font-size:15px;
+}
+.w{
+  display:inline-block;padding:2px 6px;margin:0 1px 3px 0;border-radius:5px;
+  background:var(--sunk);border:1px solid var(--line);cursor:pointer;
+  color:var(--ink2);user-select:none;
+}
+.w:hover{border-color:var(--lime-bar);color:var(--ink)}
+.w.hit{background:var(--lime-soft);border-color:var(--lime-bar);color:var(--lime);font-weight:600}
+.w.on{background:var(--lime-bar);border-color:var(--lime-bar);color:#16150c;font-weight:700}
+.w.dim{opacity:.32}
+.w.unsure{font-style:italic;opacity:.7}
+
+.empty{
+  flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;color:var(--ink3);text-align:center;padding:30px;
+  border:2px dashed var(--line2);border-radius:12px;margin:4px 0;
+}
+.empty h2{font-size:19px;color:var(--ink);margin:0;font-weight:700;letter-spacing:-.02em}
+.empty p{margin:0;font-size:14px;max-width:34ch}
+
+.status{
+  flex:none;background:var(--violet-soft);border:1px solid var(--violet);
+  border-radius:8px;padding:9px 12px;font-size:13px;color:var(--violet-ink);
+}
+.status.bad{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+.pbar{height:4px;background:var(--panel);border-radius:2px;overflow:hidden;margin-top:7px}
+.pbar i{display:block;height:100%;background:var(--violet);transition:width .3s}
+
+/* ---------- mix ---------- */
+#mix{
+  flex:1;min-height:0;overflow-y:auto;display:flex;flex-wrap:wrap;
+  align-content:flex-start;gap:6px;padding:10px;border-radius:8px;
+  background:var(--sunk);border:1px solid var(--line);
+}
+#mix.drop{border-color:var(--lime-bar);background:var(--lime-soft)}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 6px 0 11px;
+  border-radius:999px;background:var(--lime-soft);border:1px solid var(--lime-bar);
+  color:var(--lime);font-size:13px;font-weight:600;cursor:grab;user-select:none;
+}
+.chip.on{background:var(--lime-bar);color:#16150c}
+.chip .x{
+  border:0;background:transparent;color:inherit;font-size:15px;line-height:1;
+  padding:2px 4px;border-radius:50%;opacity:.55;
+}
+.chip .x:hover{opacity:1;background:rgba(0,0,0,.12)}
+.chip.dragging{opacity:.4}
+.mix-empty{color:var(--ink3);font-size:13.5px;margin:auto;text-align:center;max-width:30ch}
+.transport{display:flex;align-items:center;gap:8px;flex:none}
+.transport .time{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--ink3);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---------- save sheet ---------- */
+dialog{
+  border:1px solid var(--line2);border-radius:12px;background:var(--panel);
+  color:var(--ink);padding:22px;max-width:380px;width:calc(100% - 32px);
+  box-shadow:0 24px 60px -20px rgba(0,0,0,.45);
+}
+dialog::backdrop{background:rgba(10,9,18,.55)}
+dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
+.sheet-sub{margin:0 0 16px;color:var(--ink3);font-size:13.5px}
+.sheet-opts{display:flex;flex-direction:column;gap:8px}
+.sheet-opts .btn{width:100%;text-align:left;padding:10px 14px}
+.sheet-state{
+  margin:14px 0 0;font-size:13.5px;color:var(--violet-ink);
+  background:var(--violet-soft);border:1px solid var(--violet);
+  border-radius:8px;padding:9px 12px;
+}
+.sheet-state.bad{color:var(--warn);background:var(--warn-soft);border-color:var(--warn)}
+.sheet-foot{display:flex;justify-content:flex-end;margin-top:16px}
+
+/* ---------- zoom strip: cutting inside a word ---------- */
+#zoom{
+  flex:none;border:1px solid var(--line2);border-radius:10px;
+  background:var(--panel);padding:11px 12px 12px;display:flex;
+  flex-direction:column;gap:9px;
+}
+.zoom-head{display:flex;align-items:baseline;gap:10px}
+.zoom-word{font-weight:700;font-size:15px;letter-spacing:-.01em}
+.zoom-time{font-size:11.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.zoom-strip{
+  position:relative;height:82px;border-radius:7px;overflow:hidden;
+  background:var(--sunk);border:1px solid var(--line);touch-action:none;
+}
+#zoomWave{display:block;width:100%;height:100%}
+.handle{
+  position:absolute;top:0;bottom:0;width:11px;margin-left:-5px;
+  cursor:ew-resize;background:transparent;
+}
+.handle::before{
+  content:"";position:absolute;top:0;bottom:0;left:4px;width:3px;
+  background:var(--violet);border-radius:2px;
+}
+.handle::after{
+  content:"";position:absolute;top:50%;left:0;width:11px;height:22px;
+  margin-top:-11px;border-radius:4px;background:var(--violet);
+  box-shadow:0 1px 4px rgba(0,0,0,.35);
+}
+.handle:hover::after,.handle:focus-visible::after{filter:brightness(1.15)}
+.handle.live::before,.handle.live::after{background:var(--lime-bar)}
+.zoom-acts{display:flex;align-items:center;gap:8px}
+.zoom-acts .btn{padding:5px 12px}
+.zoom-hint{font-size:11.5px;color:var(--ink3)}
+.zoom-hint kbd{padding:0 4px;font-size:11px}
+.sylls{display:flex;flex-wrap:wrap;gap:5px}
+.syl{
+  padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;
+  background:var(--sunk);border:1px solid var(--line2);color:var(--ink2);
+  cursor:pointer;user-select:none;
+}
+.syl:hover{border-color:var(--lime-bar);color:var(--ink)}
+.syl.on{background:var(--lime-bar);border-color:var(--lime-bar);color:#16150c}
+
+.novideo{
+  margin:0;padding:14px 16px;border-radius:8px;font-size:13.5px;
+  background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
+}
