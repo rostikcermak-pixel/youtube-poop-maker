@@ -9,6 +9,11 @@ import { RATE } from './audio.js';
 
 const LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
+// How much audio to read at a time, and how much to re-read at each seam so a
+// word straddling the boundary is heard whole by one of the two passes.
+const WINDOW = 30;
+const OVERLAP = 2;
+
 // These must be the `_timestamped` exports. Whisper derives per-word times
 // from its cross-attentions, and the ordinary ONNX exports are built without
 // them: asking for word timings against `whisper-tiny.en` fails outright with
@@ -90,6 +95,7 @@ export async function listen(samples, {
   quality = 'good',
   onProgress = () => {},
   onPhase = () => {},
+  onWords = () => {},
 } = {}) {
   onPhase('downloading');
   const transcriber = await load(quality, onProgress);
@@ -100,31 +106,52 @@ export async function listen(samples, {
   onPhase('listening');
   await new Promise((r) => setTimeout(r, 0));   // let the message paint first
 
-  const result = await transcriber(samples, {
-    return_timestamps: 'word',
-    chunk_length_s: 30,
-    stride_length_s: 5,
-  });
-
-  const chunks = result?.chunks;
-  if (!Array.isArray(chunks) || !chunks.length) {
-    throw new Error("I couldn't hear any talking in this one.");
-  }
-
+  // Work through the audio a window at a time rather than handing over the
+  // whole file. A five minute clip on a phone takes minutes either way, but
+  // this way the opening words are clickable while the end is still being
+  // read, and there is a real fraction to show instead of a frozen bar.
+  const total = samples.length / RATE;
   const words = [];
-  for (const chunk of chunks) {
-    const text = (chunk.text || '').trim();
-    const [start, end] = chunk.timestamp || [];
-    if (!text || start == null) continue;
-    words.push({
-      i: words.length,
-      w: text,
-      s: Number(start),
-      // the very last word sometimes comes back open-ended
-      e: Number(end != null ? end : start + 0.2),
-      p: 1,
+  let at = 0;
+
+  while (at < total - 0.05) {
+    // Start each window slightly early so a word sitting on the seam is heard
+    // whole by at least one of the two passes.
+    const from = at > 0 ? Math.max(0, at - OVERLAP) : 0;
+    const to = Math.min(total, at + WINDOW);
+    const slice = samples.subarray(Math.round(from * RATE), Math.round(to * RATE));
+
+    const result = await transcriber(slice, {
+      return_timestamps: 'word',
+      chunk_length_s: 30,
+      stride_length_s: 5,
     });
+
+    for (const chunk of result?.chunks || []) {
+      const text = (chunk.text || '').trim();
+      const [start, end] = chunk.timestamp || [];
+      if (!text || start == null) continue;
+
+      const s = from + Number(start);
+      // anything starting before the boundary was already heard last time
+      if (at > 0 && s < at - 0.02) continue;
+      words.push({
+        i: words.length,
+        w: text,
+        s,
+        // the last word of a window often comes back open-ended
+        e: from + Number(end != null ? end : start + 0.2),
+        p: 1,
+      });
+    }
+
+    at = to;
+    // Hand back a tightened copy so what appears mid-run is usable, while the
+    // running list stays raw for the next window to append to.
+    onWords(tighten(repair(words.map((w) => ({ ...w }))), samples, RATE), at / total);
+    await new Promise((r) => setTimeout(r, 0));   // let the page paint
   }
+
   if (!words.length) throw new Error("I couldn't hear any talking in this one.");
 
   return tighten(repair(words), samples, RATE);
