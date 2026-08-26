@@ -660,14 +660,22 @@ async function importFile(file) {
       onPhase: (which) => {
         phase = which;
         if (which !== 'listening') return;
-        // Compiling and then running the model report nothing at all, and on a
-        // phone that silence runs to minutes. Say what is happening, rather
-        // than leaving a finished download's percentage sitting there looking
-        // like it has hung.
-        const guess = Math.max(1, Math.round(clip.duration / 12));
-        show(`Listening to the whole thing. This part is slow and can’t show `
-           + `progress — roughly ${guess} minute${guess > 1 ? 's' : ''} on a phone. `
-           + `Keep this tab open and awake.`, 0.6);
+        show('Listening… the words appear as it goes, and you can start '
+           + 'clicking them straight away.', 0.55);
+      },
+      onWords: (found, fraction) => {
+        // Show what has been heard so far rather than making someone wait for
+        // the whole file. On a five minute clip the opening lines are usable
+        // long before the end has been read.
+        clip.words = found;
+        if (state.activeId === clip.id) {
+          state.words = found;
+          renderScript();
+          $('searchWrap').hidden = !found.length;
+        }
+        const done = Math.round(fraction * 100);
+        show(`Listening… ${done}% — the ${found.length} words found so far are `
+           + 'already clickable.', 0.55 + fraction * 0.45);
       },
       onProgress: (fraction) => {
         if (phase !== 'downloading') return;
