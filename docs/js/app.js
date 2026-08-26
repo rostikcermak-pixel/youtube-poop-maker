@@ -287,12 +287,48 @@ function renderMix() {
   $('mixTime').textContent = mixDuration().toFixed(2) + 's';
 }
 
-function keyAtPoint(x, y) {
-  for (const chip of $('mix').querySelectorAll('.chip')) {
+/**
+ * Where a drop at this point would land.
+ *
+ * Chips wrap onto several rows, so the row matters far more than the column:
+ * the nearest chip vertically wins, and then which side of its middle the
+ * pointer is on decides before or after.
+ */
+function dropIndexAt(x, y) {
+  const chips = [...$('mix').querySelectorAll('.chip')];
+  if (!chips.length) return 0;
+
+  let index = chips.length;
+  let nearest = Infinity;
+  chips.forEach((chip, i) => {
     const r = chip.getBoundingClientRect();
-    if (y >= r.top && y <= r.bottom && x < r.left + r.width / 2) return chip.dataset.key;
+    const middleX = r.left + r.width / 2;
+    const middleY = r.top + r.height / 2;
+    const distance = Math.abs(middleY - y) * 1000 + Math.abs(middleX - x);
+    if (distance < nearest) {
+      nearest = distance;
+      index = x < middleX ? i : i + 1;
+    }
+  });
+  return index;
+}
+
+/** Put a marker where the drop would go, so you can see it before letting go. */
+function showDropAt(index) {
+  const box = $('mix');
+  let marker = box.querySelector('.drop-marker');
+  if (!marker) {
+    marker = document.createElement('span');
+    marker.className = 'drop-marker';
   }
-  return null;
+  const chips = [...box.querySelectorAll('.chip')];
+  if (index >= chips.length) box.appendChild(marker);
+  else box.insertBefore(marker, chips[index]);
+}
+
+function clearDropMarker() {
+  const marker = $('mix').querySelector('.drop-marker');
+  if (marker) marker.remove();
 }
 
 /** Clicking between chips is how you choose where the next word goes. */
@@ -313,27 +349,41 @@ function wireCaret() {
 
 function wireMixDrop() {
   const box = $('mix');
-  box.addEventListener('dragover', (ev) => { ev.preventDefault(); box.classList.add('drop'); });
-  box.addEventListener('dragleave', () => box.classList.remove('drop'));
+  box.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = ev.dataTransfer.types.includes('text/ytp-key')
+      ? 'move' : 'copy';
+    box.classList.add('drop');
+    showDropAt(dropIndexAt(ev.clientX, ev.clientY));
+  });
+  box.addEventListener('dragleave', (ev) => {
+    // dragleave also fires crossing onto a child, so only let go on a real exit
+    if (box.contains(ev.relatedTarget)) return;
+    box.classList.remove('drop');
+    clearDropMarker();
+  });
   box.addEventListener('drop', (ev) => {
     ev.preventDefault();
     box.classList.remove('drop');
+    const at = dropIndexAt(ev.clientX, ev.clientY);
+    clearDropMarker();
+
     const moved = ev.dataTransfer.getData('text/ytp-key');
     const grabbed = ev.dataTransfer.getData('text/ytp-word');
-    const before = keyAtPoint(ev.clientX, ev.clientY);
-    const at = before ? state.mix.findIndex((m) => m.key === before) : -1;
 
     if (moved) {
-      const idx = state.mix.findIndex((m) => m.key === moved);
-      if (idx < 0) return;
+      const from = state.mix.findIndex((m) => m.key === moved);
+      if (from < 0) return;
       remember();
-      const [item] = state.mix.splice(idx, 1);
-      if (at < 0) state.mix.push(item); else state.mix.splice(at, 0, item);
+      const [item] = state.mix.splice(from, 1);
+      // taking it out shifts everything after it back by one
+      state.mix.splice(from < at ? at - 1 : at, 0, item);
+      state.caret = Math.min(state.caret, state.mix.length);
       renderMix();
     } else if (grabbed) {
-      const item = { key: Math.random().toString(36).slice(2), ...JSON.parse(grabbed) };
-      if (at < 0) state.mix.push(item); else state.mix.splice(at, 0, item);
-      renderMix();
+      state.caret = at;
+      const word = JSON.parse(grabbed);
+      insertIntoMix([word]);
     }
   });
 }
@@ -1081,6 +1131,11 @@ function wire() {
     const clip = state.clips.find((c) => c.id === state.activeId);
     if (clip) drawWave(clip);
     if (state.zoom) drawZoom();
+  });
+
+  document.addEventListener('dragend', () => {
+    $('mix').classList.remove('drop');
+    clearDropMarker();
   });
 
   wireCaret();

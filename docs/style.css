@@ -332,3 +332,13 @@ dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
   .nudge{padding:7px 8px;font-size:17px}
   .chip{height:38px}
 }
+
+/* ---------- where a dragged word will land ---------- */
+.drop-marker{
+  width:4px;align-self:stretch;min-height:28px;flex:none;border-radius:2px;
+  background:var(--lime-bar);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--lime-bar) 25%, transparent);
+}
+@supports not (background: color-mix(in srgb, red 50%, transparent)){
+  .drop-marker{box-shadow:none}
+}
