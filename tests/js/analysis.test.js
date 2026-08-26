@@ -148,3 +148,71 @@ test('the smoothed and raw loudness curves are not the same thing', () => {
   assert.equal(raw[justBefore], 0);
   assert.ok(smooth[justBefore] > 0);
 });
+
+test('a collapsed word claims the empty gap in front of it', () => {
+  // Real output: "it" came back as 10.540-10.540 with 140ms of unclaimed
+  // space before "could". Neither neighbour was hogging its time, so looking
+  // only at bloated neighbours left it silent.
+  const words = [
+    { i: 0, w: 'and', s: 10.30, e: 10.42, p: 1 },
+    { i: 1, w: 'that', s: 10.48, e: 10.54, p: 1 },
+    { i: 2, w: 'it', s: 10.54, e: 10.54, p: 1 },
+    { i: 3, w: 'could', s: 10.68, e: 10.96, p: 1 },
+    { i: 4, w: 'take', s: 11.00, e: 11.30, p: 1 },
+    { i: 5, w: 'over', s: 11.34, e: 11.70, p: 1 },
+  ];
+
+  const out = repair(words);
+  const it = out.find((w) => w.w === 'it');
+
+  assert.ok(it.e - it.s >= MIN_WORD, 'still silent when clicked');
+  assert.ok(it.e - it.s > 0.1, `only claimed ${(it.e - it.s).toFixed(3)}s of the 140ms gap`);
+  assert.equal(out.find((w) => w.w === 'that').e, 10.54, 'stole from an innocent neighbour');
+  assert.equal(out.find((w) => w.w === 'could').s, 10.68, 'stole from an innocent neighbour');
+});
+
+test('words past the end of the audio are dropped, not inverted', () => {
+  // Real output: "artificial" started at 25.180 against 25.01s of audio.
+  // Clamping only the end leaves the end before the start.
+  const samples = syllabic([[0.2, 0.6]], 1.0);
+  const words = [
+    { i: 0, w: 'from', s: 0.2, e: 0.6, p: 1 },
+    { i: 1, w: 'artificial', s: 1.18, e: 1.20, p: 1 },
+  ];
+
+  const out = tighten(words, samples, RATE);
+
+  assert.equal(out.length, 1, 'the out-of-bounds word should be gone');
+  for (const w of out) {
+    assert.ok(w.e > w.s, `${w.w} has its end (${w.e}) before its start (${w.s})`);
+    assert.ok(w.e <= 1.0 + 1e-9, `${w.w} ends past the audio`);
+  }
+});
+
+test('every word always has a positive length and sits inside the audio', () => {
+  const samples = syllabic([[0.1, 0.3], [0.5, 0.8]], 1.0);
+  const words = [
+    { i: 0, w: 'a', s: -0.5, e: 0.3, p: 1 },
+    { i: 1, w: 'b', s: 0.5, e: 5.0, p: 1 },
+    { i: 2, w: 'c', s: 0.99, e: 0.99, p: 1 },
+  ];
+
+  for (const w of tighten(words, samples, RATE)) {
+    assert.ok(w.s >= 0, `${w.w} starts before zero`);
+    assert.ok(w.e > w.s, `${w.w} has no length`);
+    assert.ok(w.e <= 1.0 + 1e-9, `${w.w} ends past the audio`);
+  }
+});
+
+test('tightening never guts a word', () => {
+  // A stop consonant leaves a quiet closure mid-word that an edge can snap to
+  // instead of the real end. Real output: "benefit" was healthy until
+  // tightening cut it to 45ms.
+  const samples = syllabic([[0.30, 0.42], [0.50, 0.72]], 1.2);
+  const words = [{ i: 0, w: 'benefit', s: 0.30, e: 0.72, p: 1 }];
+
+  const out = tighten(words, samples, RATE);
+
+  const kept = out[0].e - out[0].s;
+  assert.ok(kept >= 0.42 * 0.5, `tightening cut the word to ${kept.toFixed(3)}s of 0.42s`);
+});

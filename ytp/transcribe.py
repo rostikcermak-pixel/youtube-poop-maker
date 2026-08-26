@@ -38,6 +38,7 @@ HOP = 80                     # 5 ms at 16 kHz
 SNAP_WINDOW = 0.12           # how far either side of a reported edge to look
 PULL = 0.5                   # bias toward leaving the edge where it was
 MIN_WORD = 0.02              # never let a word collapse below 20 ms
+KEEP_AT_LEAST = 0.5          # tightening may not cut a word below this share
 
 
 def _energy(samples: np.ndarray) -> np.ndarray:
@@ -96,6 +97,19 @@ def repair(words: list[dict]) -> list[dict]:
     for i, word in enumerate(words):
         if word["e"] - word["s"] >= MIN_WORD:
             continue
+
+        # The word's time is often not in a neighbour at all — it's sitting in
+        # an unclaimed gap that nothing occupies. Observed on real output: "it"
+        # came back as 10.540-10.540 with 140 ms of empty space in front of it.
+        # Take the gap first, because it costs no neighbour anything.
+        prev = words[i - 1] if i > 0 else None
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        gap_from = max(prev["e"], word["s"]) if prev else word["s"]
+        gap_to = nxt["s"] if nxt else word["e"]
+        if gap_to - gap_from >= MIN_WORD:
+            word["s"], word["e"] = gap_from, gap_to
+            continue
+
         for j in (i - 1, i + 1):
             if not 0 <= j < len(words):
                 continue
@@ -128,6 +142,21 @@ def tighten(words: list[dict], samples: np.ndarray) -> list[dict]:
         return words
     energy = _energy(samples)
     total = samples.size / SAMPLE_RATE
+
+    # The recogniser's last chunk can overrun the audio: observed on real
+    # output, "artificial" came back starting at 25.180 against 25.01 s of
+    # sound. Clamping only the end would leave the end before the start, so
+    # anything with no audio left to sit in goes, and the rest is pulled back
+    # inside the file before any of the edge finding runs.
+    words = [w for w in words if w["s"] < total - MIN_WORD / 2]
+    if not words:
+        return words
+    for word in words:
+        word["s"] = max(0.0, min(word["s"], total - MIN_WORD))
+        word["e"] = max(word["s"] + MIN_WORD, min(word["e"], total))
+    for i, word in enumerate(words):
+        word["i"] = i
+
     raw = [(w["s"], w["e"]) for w in words]
 
     for word, (rs, re) in zip(words, raw):
@@ -140,9 +169,15 @@ def tighten(words: list[dict], samples: np.ndarray) -> list[dict]:
             middle = (earlier["e"] + later["s"]) / 2
             earlier["e"] = later["s"] = middle
 
-    # If any of that crushed a word, its original timing was better than ours.
+    # Tightening is meant to nudge an edge onto the nearby silence, not to
+    # resize the word. A word with a stop consonant in it has a quiet closure
+    # in the middle, and an edge can snap to that instead of the real end:
+    # observed on real output, "benefit" was healthy until tightening cut it
+    # to 45 ms. If a word loses most of itself, the reported timing was better
+    # than ours.
     for word, (rs, re) in zip(words, raw):
-        if word["e"] - word["s"] < MIN_WORD:
+        after = word["e"] - word["s"]
+        if after < MIN_WORD or after < (re - rs) * KEEP_AT_LEAST:
             word["s"], word["e"] = rs, re
 
     # Restoring can put an edge back over its neighbour, so settle order last.

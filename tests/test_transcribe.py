@@ -108,3 +108,62 @@ def test_repair_leaves_healthy_neighbours_alone():
 
 def test_repair_survives_short_input():
     assert repair([]) == []
+
+
+def test_a_collapsed_word_claims_the_empty_gap_in_front_of_it():
+    """Real output: "it" came back as 10.540-10.540 with 140ms unclaimed.
+
+    Neither neighbour was hogging its time, so looking only at bloated
+    neighbours left it silent when clicked.
+    """
+    words = words_from([(10.30, 10.42), (10.48, 10.54), (10.54, 10.54),
+                        (10.68, 10.96), (11.00, 11.30), (11.34, 11.70)])
+    for word, text in zip(words, ["and", "that", "it", "could", "take", "over"]):
+        word["w"] = text
+
+    out = repair(words)
+    it = next(w for w in out if w["w"] == "it")
+
+    assert it["e"] - it["s"] >= MIN_WORD, "still silent when clicked"
+    assert it["e"] - it["s"] > 0.1, f"only claimed {it['e'] - it['s']:.3f}s of the gap"
+    assert next(w for w in out if w["w"] == "that")["e"] == 10.54
+    assert next(w for w in out if w["w"] == "could")["s"] == 10.68
+
+
+def test_words_past_the_end_of_the_audio_are_dropped_not_inverted():
+    """Real output: "artificial" started at 25.180 against 25.01s of audio."""
+    samples = speech_like([(0.2, 0.6)], total=1.0)
+    words = words_from([(0.2, 0.6), (1.18, 1.20)])
+    words[0]["w"], words[1]["w"] = "from", "artificial"
+
+    out = tighten(words, samples)
+
+    assert len(out) == 1, "the out-of-bounds word should be gone"
+    for word in out:
+        assert word["e"] > word["s"], f"{word['w']} ends before it starts"
+        assert word["e"] <= 1.0 + 1e-9
+
+
+def test_every_word_has_positive_length_and_sits_inside_the_audio():
+    samples = speech_like([(0.1, 0.3), (0.5, 0.8)], total=1.0)
+    words = words_from([(-0.5, 0.3), (0.5, 5.0), (0.99, 0.99)])
+
+    for word in tighten(words, samples):
+        assert word["s"] >= 0
+        assert word["e"] > word["s"]
+        assert word["e"] <= 1.0 + 1e-9
+
+
+def test_tightening_never_guts_a_word():
+    """A stop consonant leaves a quiet closure mid-word that an edge can snap
+    to instead of the real end. Real output: "benefit" was healthy until
+    tightening cut it to 45ms."""
+    # loud, a quiet closure in the middle, loud again — one word, not two
+    samples = speech_like([(0.30, 0.42), (0.50, 0.72)], total=1.2)
+    words = words_from([(0.30, 0.72)])
+    words[0]["w"] = "benefit"
+
+    out = tighten(words, samples)
+
+    kept = out[0]["e"] - out[0]["s"]
+    assert kept >= 0.42 * 0.5, f"tightening cut the word to {kept:.3f}s of 0.42s"

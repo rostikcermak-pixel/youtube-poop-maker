@@ -13,6 +13,7 @@ export const PULL = 0.5;           // bias toward leaving an edge where it was
 export const PEAK_FLOOR = 0.25;    // ignore bumps below this share of the loudest
 export const VALLEY_DROP = 0.9;    // how far a dip must fall below its peaks
 export const QUIET = 0.15;         // share of peak level counted as "quiet"
+export const KEEP_AT_LEAST = 0.5;  // tightening may not cut a word below this share
 
 // VALLEY_DROP is deliberately permissive. Syllables inside a word are joined,
 // not separated by silence, so the dip between them is shallow: measured on 33
@@ -150,6 +151,20 @@ export function repair(words) {
     const word = words[i];
     if (word.e - word.s >= MIN_WORD) continue;
 
+    // The word's time is often not in a neighbour at all — it's sitting in an
+    // unclaimed gap that nothing occupies. Observed on real output: "it" came
+    // back as 10.540-10.540 with 140ms of empty space in front of it. Take
+    // the gap first, because it costs no neighbour anything.
+    const prev = words[i - 1];
+    const next = words[i + 1];
+    const gapFrom = prev ? Math.max(prev.e, word.s) : word.s;
+    const gapTo = next ? next.s : word.e;
+    if (gapTo - gapFrom >= MIN_WORD) {
+      word.s = gapFrom;
+      word.e = gapTo;
+      continue;
+    }
+
     for (const j of [i - 1, i + 1]) {
       if (j < 0 || j >= words.length) continue;
       const other = words[j];
@@ -186,6 +201,20 @@ export function tighten(words, samples, rate) {
   if (!words.length) return words;
   const env = rawEnergy(samples);
   const total = samples.length / rate;
+
+  // The recogniser's last chunk can overrun the audio: observed on real
+  // output, "artificial" came back starting at 25.180 against 25.01s of
+  // sound. Clamping only the end would leave the end before the start, so
+  // anything with no audio left to sit in goes, and the rest is pulled back
+  // inside the file before any of the edge finding runs.
+  words = words.filter((w) => w.s < total - MIN_WORD / 2);
+  if (!words.length) return words;
+  words.forEach((w) => {
+    w.s = Math.max(0, Math.min(w.s, total - MIN_WORD));
+    w.e = Math.max(w.s + MIN_WORD, Math.min(w.e, total));
+  });
+  words.forEach((w, i) => { w.i = i; });
+
   const raw = words.map((w) => [w.s, w.e]);
 
   words.forEach((word, i) => {
@@ -201,8 +230,19 @@ export function tighten(words, samples, rate) {
     }
   }
 
+  // Tightening is meant to nudge an edge onto the nearby silence, not to
+  // resize the word. A word with a stop consonant in it has a quiet closure
+  // in the middle, and an edge can snap to that instead of the real end:
+  // observed on real output, "benefit" was healthy until tightening cut it
+  // to 45ms. If a word loses most of itself, the reported timing was better
+  // than ours.
   words.forEach((word, i) => {
-    if (word.e - word.s < MIN_WORD) { word.s = raw[i][0]; word.e = raw[i][1]; }
+    const before = raw[i][1] - raw[i][0];
+    const after = word.e - word.s;
+    if (after < MIN_WORD || after < before * KEEP_AT_LEAST) {
+      word.s = raw[i][0];
+      word.e = raw[i][1];
+    }
   });
   for (let i = 0; i < words.length - 1; i++) {
     if (words[i].e > words[i + 1].s) {

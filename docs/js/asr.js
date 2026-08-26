@@ -9,9 +9,15 @@ import { RATE } from './audio.js';
 
 const LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
 
+// These must be the `_timestamped` exports. Whisper derives per-word times
+// from its cross-attentions, and the ordinary ONNX exports are built without
+// them: asking for word timings against `whisper-tiny.en` fails outright with
+// "Model outputs must contain cross attentions to extract timestamps". Every
+// part of this app is built on word times, so a plain export is not a
+// lower-quality option here, it is a broken one.
 export const MODELS = {
-  fast: { id: 'onnx-community/whisper-tiny.en', label: 'faster', mb: 40 },
-  good: { id: 'onnx-community/whisper-base.en', label: 'better', mb: 80 },
+  fast: { id: 'onnx-community/whisper-tiny.en_timestamped', label: 'faster', mb: 40 },
+  good: { id: 'onnx-community/whisper-base.en_timestamped', label: 'better', mb: 80 },
 };
 
 let pipe = null;
