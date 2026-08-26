@@ -127,10 +127,30 @@ function playMix() {
 
 /* -------------------------------------------------------------------- mix */
 
+// Losing twenty minutes of work to a mis-tapped x is the fastest way to make
+// someone close the tab, so every change to the mix is reversible.
+const history = [];
+
+function remember() {
+  history.push(JSON.stringify({ mix: state.mix, caret: state.caret }));
+  if (history.length > 200) history.shift();
+}
+
+function undo() {
+  const previous = history.pop();
+  if (previous === undefined) return;
+  const was = JSON.parse(previous);
+  state.mix = was.mix;
+  state.caret = Math.min(was.caret, state.mix.length);
+  stopAll();
+  renderMix();
+}
+
 const mixDuration = () => state.mix.reduce((sum, m) => sum + (m.e - m.s), 0);
 
 /** Put pieces in at the caret, then leave the caret after what was added. */
 function insertIntoMix(pieces) {
+  remember();
   const items = pieces.map((p) => ({ key: Math.random().toString(36).slice(2), ...p }));
   const at = Math.max(0, Math.min(state.caret, state.mix.length));
   state.mix.splice(at, 0, ...items);
@@ -174,9 +194,18 @@ function renderMix() {
       x.title = 'remove';
       x.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        const gone = state.mix.findIndex((m) => m.key === item.key);
-        state.mix = state.mix.filter((m) => m.key !== item.key);
-        if (gone > -1 && gone < state.caret) state.caret -= 1;
+        remember();
+        // A built word arrives as several chips that only mean anything
+        // together, so removing one removes the whole word rather than
+        // leaving orphaned continuation chips behind.
+        const doomed = item.group
+          ? state.mix.filter((m) => m.group === item.group).map((m) => m.key)
+          : [item.key];
+        const first = state.mix.findIndex((m) => doomed.includes(m.key));
+        state.mix = state.mix.filter((m) => !doomed.includes(m.key));
+        if (first > -1 && first < state.caret) {
+          state.caret = Math.max(first, state.caret - doomed.length);
+        }
         renderMix();
       });
       chip.appendChild(x);
@@ -236,6 +265,7 @@ function wireMixDrop() {
     if (moved) {
       const idx = state.mix.findIndex((m) => m.key === moved);
       if (idx < 0) return;
+      remember();
       const [item] = state.mix.splice(idx, 1);
       if (at < 0) state.mix.push(item); else state.mix.splice(at, 0, item);
       renderMix();
@@ -400,14 +430,73 @@ function renderTabs() {
   const box = $('tabs');
   box.innerHTML = '';
   state.clips.forEach((clip) => {
-    const b = document.createElement('button');
-    b.className = 'tab' + (clip.id === state.activeId ? ' on' : '') +
-                  (clip.status !== 'ready' ? ' busy' : '');
-    b.textContent = clip.name.replace(/\.[^.]+$/, '');
-    b.title = clip.name;
-    b.addEventListener('click', () => selectClip(clip.id));
-    box.appendChild(b);
+    const tab = document.createElement('span');
+    tab.className = 'tab' + (clip.id === state.activeId ? ' on' : '') +
+                    (clip.status !== 'ready' ? ' busy' : '');
+
+    const name = document.createElement('button');
+    name.className = 'tab-name';
+    name.textContent = clip.name.replace(/\.[^.]+$/, '');
+    name.title = clip.name;
+    name.addEventListener('click', () => selectClip(clip.id));
+    tab.appendChild(name);
+
+    const close = document.createElement('button');
+    close.className = 'tab-x';
+    close.innerHTML = '&times;';
+    close.title = 'close this video';
+    close.setAttribute('aria-label', `close ${clip.name}`);
+    close.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeClip(clip.id);
+    });
+    tab.appendChild(close);
+
+    box.appendChild(tab);
   });
+}
+
+/** Drop a clip and everything that points at it. */
+function closeClip(clipId) {
+  const clip = state.clips.find((c) => c.id === clipId);
+  if (!clip) return;
+
+  const inMix = state.mix.filter((m) => m.clipId === clipId).length;
+  if (inMix && !window.confirm(
+    `${inMix} piece${inMix > 1 ? 's' : ''} of your mix came from this video and will go too. Close it?`)) {
+    return;
+  }
+
+  stopAll();
+  if (inMix) remember();
+  state.mix = state.mix.filter((m) => m.clipId !== clipId);
+  state.caret = Math.min(state.caret, state.mix.length);
+
+  // let go of the decoded audio, the blob and the hidden export element
+  buffers.delete(clipId);
+  URL.revokeObjectURL(clip.url);
+  if (clip.exportVideo) clip.exportVideo.remove();
+  state.clips = state.clips.filter((c) => c.id !== clipId);
+  state.sounds = null;                    // the sound index is now stale
+
+  if (state.activeId === clipId) {
+    state.activeId = null;
+    state.zoom = null;
+    state.words = [];
+    $('zoom').hidden = true;
+    if (state.clips.length) {
+      selectClip(state.clips[state.clips.length - 1].id);
+    } else {
+      $('loaded').hidden = true;
+      $('dropzone').hidden = false;
+      $('searchWrap').hidden = true;
+      $('script').innerHTML = '';
+      setStatus('');
+      $('video').removeAttribute('src');
+    }
+  }
+  renderTabs();
+  renderMix();
 }
 
 function setStatus(message, fraction, bad) {
@@ -546,6 +635,11 @@ async function importFile(file) {
     // ?model=fast picks the smaller, rougher model — handy on a slow machine
     const quality = new URLSearchParams(location.search).get('model') === 'fast'
       ? 'fast' : 'good';
+    const minutes = clip.duration / 60;
+    show(`Listening to the whole thing\u2026 about ${
+      minutes < 1.5 ? 'half a minute' : `${Math.ceil(minutes)} minute${minutes >= 2 ? 's' : ''}`
+    } of work.`, 0.45);
+
     clip.words = await listen(clip.samples, {
       quality,
       onProgress: (fraction) => show(
@@ -632,10 +726,12 @@ function showOptions(target, options) {
     use.textContent = 'insert';
     use.title = 'put it in the mix where the caret is';
     use.addEventListener('click', () => {
+      const group = Math.random().toString(36).slice(2);
       insertIntoMix(option.pieces.map((piece, i) => ({
         clipId: piece.clipId,
         s: piece.s,
         e: piece.e,
+        group,
         // one word can span several clips, so only the first chip carries the
         // name and the rest read as a continuation of it
         w: i === 0 ? target : '\u2026',
@@ -786,6 +882,7 @@ function wire() {
 
   $('play').addEventListener('click', () => { if (state.playing) stopAll(); else playMix(); });
   $('clear').addEventListener('click', () => {
+    remember();
     state.mix = [];
     state.caret = 0;
     stopAll();
@@ -840,10 +937,22 @@ function wire() {
       addToMix(s.clipId, s.s, s.e, s.w);
     }
     if (ev.key === 'Escape') stopAll();
+    if (!typing && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+      ev.preventDefault();
+      undo();
+    }
     if (!typing && state.zoom && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
       ev.preventDefault();
       nudge((ev.shiftKey ? 0.001 : 0.01) * (ev.key === 'ArrowLeft' ? -1 : 1));
     }
+  });
+
+  // Everything lives in memory, so a stray reload takes the whole mix with
+  // it. The browser only shows this when there is something to lose.
+  window.addEventListener('beforeunload', (ev) => {
+    if (!state.mix.length) return;
+    ev.preventDefault();
+    ev.returnValue = '';
   });
 
   window.addEventListener('resize', () => {
