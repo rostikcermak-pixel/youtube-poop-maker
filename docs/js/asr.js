@@ -47,14 +47,31 @@ export async function load(quality = 'good', onProgress = () => {}) {
   const { pipeline } = await lib();
   const device = (await usingGpu()) ? 'webgpu' : 'wasm';
 
+  // The model is several files, and the callback reports each one separately.
+  // Reporting one file's fraction makes the bar hit 100% over and over and
+  // then sit there while the rest are still coming, so add them up instead.
+  const files = new Map();
+  const report = () => {
+    let loaded = 0;
+    let total = 0;
+    for (const file of files.values()) {
+      loaded += file.loaded;
+      total += file.total;
+    }
+    onProgress(total ? loaded / total : 0);
+  };
+
   pipe = await pipeline('automatic-speech-recognition', model.id, {
     device,
     dtype: 'q8',
-    progress_callback: (report) => {
-      if (report.status === 'progress' && report.total) {
-        onProgress(report.loaded / report.total, report.file || '');
-      } else if (report.status === 'ready') {
-        onProgress(1, '');
+    progress_callback: (update) => {
+      if (!update || !update.file) return;
+      if (update.status === 'progress' && update.total) {
+        files.set(update.file, { loaded: update.loaded || 0, total: update.total });
+        report();
+      } else if (update.status === 'done') {
+        const file = files.get(update.file);
+        if (file) { file.loaded = file.total; report(); }
       }
     },
   });
@@ -72,15 +89,21 @@ export async function load(quality = 'good', onProgress = () => {}) {
 export async function listen(samples, {
   quality = 'good',
   onProgress = () => {},
-  onPartial = null,
+  onPhase = () => {},
 } = {}) {
+  onPhase('downloading');
   const transcriber = await load(quality, onProgress);
+
+  // Downloading is only the first part. Compiling the model and then running
+  // it report nothing at all, and on a phone that silence lasts minutes — so
+  // say which part is happening rather than leaving the last percentage up.
+  onPhase('listening');
+  await new Promise((r) => setTimeout(r, 0));   // let the message paint first
 
   const result = await transcriber(samples, {
     return_timestamps: 'word',
     chunk_length_s: 30,
     stride_length_s: 5,
-    callback_function: onPartial || undefined,
   });
 
   const chunks = result?.chunks;

@@ -2,7 +2,7 @@
 
 import { peaks, snapPoints, splitSyllables } from './analysis.js';
 import { RATE, decodeTo16kMono, mixdown, toWav } from './audio.js';
-import { MODELS, listen, usingGpu } from './asr.js';
+import { MODELS, listen } from './asr.js';
 import { recordMix, supported as canRecord } from './export.js';
 import { load as loadSounds, soundsOf, tidy } from './phonemes.js';
 import { indexSounds, planWord } from './wordbuild.js';
@@ -424,6 +424,27 @@ function nudge(seconds) {
   audition(z.clipId, z.s, z.e, null);
 }
 
+/**
+ * Which speech model to use.
+ *
+ * The bigger one is noticeably more accurate but runs several times slower,
+ * and on a phone under WebAssembly that is the difference between a wait and
+ * something that looks like it has hung. Small screens and low core counts
+ * get the small model unless the URL says otherwise.
+ */
+function chosenQuality() {
+  const asked = new URLSearchParams(location.search).get('model');
+  if (asked === 'fast' || asked === 'good') return asked;
+
+  // A small screen you can touch is a phone. Core count is only a tie-breaker
+  // for genuinely feeble machines: plenty of perfectly capable desktops report
+  // four, so treating four as weak downgrades everybody.
+  const narrow = Math.min(screen.width || 9999, screen.height || 9999) < 820;
+  const touch = (navigator.maxTouchPoints || 0) > 0;
+  const feeble = (navigator.hardwareConcurrency || 8) <= 2;
+  return (narrow && touch) || feeble ? 'fast' : 'good';
+}
+
 /* ---------------------------------------------------------------- clips UI */
 
 function renderTabs() {
@@ -629,22 +650,37 @@ async function importFile(file) {
     clip.peaks = peaks(clip.samples, 2000);
     if (state.activeId === clip.id) drawWave(clip);
 
-    const gpu = await usingGpu();
-    show(`Getting the listener ready${gpu ? '' : ' (this browser has no GPU, so it’s slower)'}…`, 0.1);
+    show('Getting the listener ready…', 0.1);
 
-    // ?model=fast picks the smaller, rougher model — handy on a slow machine
-    const quality = new URLSearchParams(location.search).get('model') === 'fast'
-      ? 'fast' : 'good';
-    const minutes = clip.duration / 60;
-    show(`Listening to the whole thing\u2026 about ${
-      minutes < 1.5 ? 'half a minute' : `${Math.ceil(minutes)} minute${minutes >= 2 ? 's' : ''}`
-    } of work.`, 0.45);
+    const quality = chosenQuality();
+    let phase = 'downloading';
 
     clip.words = await listen(clip.samples, {
       quality,
-      onProgress: (fraction) => show(
-        `Downloading the speech model, ${Math.round(fraction * 100)}% — one time only…`,
-        0.1 + fraction * 0.3),
+      onPhase: (which) => {
+        phase = which;
+        if (which !== 'listening') return;
+        // Compiling and then running the model report nothing at all, and on a
+        // phone that silence runs to minutes. Say what is happening, rather
+        // than leaving a finished download's percentage sitting there looking
+        // like it has hung.
+        const guess = Math.max(1, Math.round(clip.duration / 12));
+        show(`Listening to the whole thing. This part is slow and can’t show `
+           + `progress — roughly ${guess} minute${guess > 1 ? 's' : ''} on a phone. `
+           + `Keep this tab open and awake.`, 0.6);
+      },
+      onProgress: (fraction) => {
+        if (phase !== 'downloading') return;
+        if (fraction >= 0.999) {
+          // Downloading finishing is not the same as being ready: the model
+          // still has to be compiled, which reports nothing and is slow on a
+          // phone. Leaving "100%" up through that is what makes it look stuck.
+          show('Unpacking the model… this takes a moment.', 0.55);
+          return;
+        }
+        show(`Downloading the speech model, ${Math.round(fraction * 100)}% — one `
+           + `time only, then it’s kept…`, 0.1 + fraction * 0.45);
+      },
     });
 
     clip.status = 'ready';
@@ -860,6 +896,15 @@ function saveMix() {
 /* ------------------------------------------------------------------ wiring */
 
 function wire() {
+  // Say the size of the model this device will actually get, not a number
+  // that is wrong for half of them.
+  const picked = MODELS[chosenQuality()] || MODELS.good;
+  const note = $('firstrun');
+  if (note) {
+    note.textContent = `First time only, it downloads about ${picked.mb} MB of speech `
+      + `model, then keeps it.`;
+  }
+
   $('pick').addEventListener('click', () => $('file').click());
   $('add').addEventListener('click', () => $('file').click());
   $('file').addEventListener('change', (ev) => {
