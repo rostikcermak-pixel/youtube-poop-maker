@@ -1,10 +1,16 @@
 # YTP Maker
 
+### → [rostikcermak-pixel.github.io/youtube-poop-maker](https://rostikcermak-pixel.github.io/youtube-poop-maker/)
+
 Make him say things he never said.
 
 A sentence-mixing editor for making YouTube Poops. Drop a video in, it writes
 down every word the speaker says, and you click the words you want. No timeline
 scrubbing, no typing timecodes.
+
+Nothing to install and nothing to sign up for. It all runs in the tab, so your
+video is never uploaded anywhere — the first visit fetches a speech model
+(40 MB on a phone, 80 MB on a desktop) and keeps it for next time.
 
 ## The idea
 
@@ -22,8 +28,11 @@ Everything runs in the tab — the speech recognition included. Your video is
 never uploaded anywhere. Hosted on GitHub Pages, so it costs nothing to keep
 running.
 
-The first visit downloads about 80 MB of speech model, which the browser then
-caches. Add `?model=fast` to the URL for a smaller, rougher one.
+Phones get the small, quick model and desktops the larger, more accurate one.
+`?model=fast` and `?model=good` override that either way.
+
+Long clips are read a window at a time, so the opening words are clickable
+while the end is still being transcribed.
 
 To run it locally:
 
@@ -33,8 +42,8 @@ python -m http.server -d docs
 
 ### On your own machine (`ytp/`)
 
-The Python version. Faster on long videos, and it's the one that can save a
-finished video file rather than just the audio.
+The Python version. Faster on long videos, and it renders a saved video with
+ffmpeg rather than by recording playback, so saving isn't limited to real time.
 
 ```
 uv venv
@@ -62,10 +71,19 @@ The browser code is a port of the Python analysis, so the two are also checked
 against each other by running both over identical samples — that's what caught
 the start edges drifting a frame early.
 
-## Where it's up to
+## What it does
 
-Working: import, transcribe, search, click a word to hear it, cut inside a word,
-build a mix, play it back, save the audio. The Python version also saves video.
+- Import a video; every word is transcribed with its own timing
+- Search every word across every clip you have open
+- Click a word to hear it on its own, double-click to use it
+- Cut inside a word, either from its syllable pieces or with magnetic handles
+- **Make a word nobody said**, spliced from sounds inside other words
+- Drop anything at a caret, so a new word goes mid-sentence rather than on the end
+- Undo anything
+- Save as a video or just the sound
 
-Next: the say-it box (type a sentence, get ranked ways to build it from what the
-speaker actually said), then effects.
+Every cut gets an 8 ms fade, always, which is what stops joins clicking.
+
+Not built: effects (stutter, reverse, pitch, and the rest), and loading a video
+from a URL — the browser isn't allowed to fetch from YouTube, so files go in by
+hand.
