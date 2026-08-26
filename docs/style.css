@@ -262,3 +262,42 @@ dialog h3{margin:0 0 4px;font-size:18px;letter-spacing:-.02em}
   .empty h2{font-size:16px}
   video{max-height:20vh}
 }
+
+/* ---------- the caret: where the next thing lands ---------- */
+.caret{
+  width:3px;align-self:stretch;min-height:26px;border-radius:2px;
+  background:var(--violet);flex:none;animation:blink 1.1s steps(2,start) infinite;
+}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.caret{animation:none}}
+#mix{cursor:text}
+
+/* ---------- make a word ---------- */
+.maker{
+  flex:none;border:1px solid var(--line2);border-radius:10px;
+  background:var(--panel);padding:11px 12px;display:flex;
+  flex-direction:column;gap:8px;
+}
+.maker .search{margin:0}
+.maker .btn{padding:6px 13px;white-space:nowrap}
+#makeOut{display:flex;flex-direction:column;gap:6px;max-height:30vh;overflow-y:auto}
+.option{
+  display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;
+  background:var(--sunk);border:1px solid var(--line);
+}
+.option .how{
+  flex:1;min-width:0;font-size:12.5px;color:var(--ink2);line-height:1.4;
+}
+.option .how b{color:var(--lime);font-weight:600}
+.option .joins{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;
+  color:var(--ink3);white-space:nowrap;
+}
+.option button{
+  border:1px solid var(--line2);background:var(--panel);color:var(--ink2);
+  border-radius:7px;padding:5px 10px;font-size:12.5px;font-weight:600;white-space:nowrap;
+}
+.option button:hover{border-color:var(--violet);color:var(--violet-ink)}
+.option .use{background:var(--violet);border-color:var(--violet);color:#fff}
+.maker-note{margin:0;font-size:12.5px;color:var(--ink3);line-height:1.45}
+.maker-note.bad{color:var(--warn)}
